@@ -1,0 +1,21 @@
+{
+  "call_id": "call_demo_region",
+  "customer_id": "cust_005",
+  "agent_id": "agt_063",
+  "title": "Top product not sold in this customer's region -- excluded automatically, next best offered instead",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Ines -- how can I help today?"},
+    {"channel": "customer", "text": "Hi, my colleague in Spain mentioned a savings account paying good interest, do you have that here too?",
+     "sentiment": 0.25, "themes": ["savings"], "trigger": true},
+    {"channel": "agent", "text": "Let me check what's actually available in your country -- offers can differ by market."},
+    {"channel": "customer", "text": "Ah, I didn't realise that varied, that makes sense."},
+    {"channel": "agent", "text": "Right, some products are market-specific. Let me see what we do have for you."},
+    {"channel": "customer", "text": "Okay, I'm open to alternatives if the savings one isn't available here.",
+     "sentiment": 0.2, "themes": ["product_enquiry"], "trigger": true},
+    {"channel": "agent", "text": "Appreciate the flexibility -- give me just a moment."},
+    {"channel": "customer", "text": "No problem, take your time."},
+    {"channel": "agent", "text": "Thanks for your patience -- here's what I'd recommend for your account."},
+    {"channel": "customer", "text": "That works, thank you for explaining."},
+    {"channel": "agent", "text": "Glad to help -- thanks for calling, have a great day!"}
+  ]
+}

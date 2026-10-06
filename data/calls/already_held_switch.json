@@ -1,0 +1,24 @@
+{
+  "call_id": "call_demo_already_held",
+  "customer_id": "cust_004",
+  "agent_id": "agt_011",
+  "title": "Top product already held -- system quietly pivots to the next best eligible product",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Noah -- how can I help today?"},
+    {"channel": "customer", "text": "Hi, I keep getting emails about a savings account with better interest. Can I get that?",
+     "sentiment": 0.3, "themes": ["savings"], "trigger": true},
+    {"channel": "agent", "text": "Let me check what you already have and what else might fit."},
+    {"channel": "customer", "text": "Sure, go ahead."},
+    {"channel": "agent", "text": "Looks like you actually already opened that one a while back -- it's already on your account."},
+    {"channel": "customer", "text": "Oh really? I had no idea, I don't think I've ever used it.",
+     "sentiment": 0.1, "themes": ["savings"]},
+    {"channel": "agent", "text": "That happens more than you'd think. Would you like me to check if there's anything else worth looking at instead?"},
+    {"channel": "customer", "text": "Sure, I travel a fair bit for work, if that helps.",
+     "sentiment": 0.2, "themes": ["product_enquiry"], "trigger": true},
+    {"channel": "agent", "text": "Noted -- let me see what fits a frequent traveller on your account."},
+    {"channel": "customer", "text": "Appreciate it, thanks."},
+    {"channel": "agent", "text": "Here's what I'd suggest based on your account."},
+    {"channel": "customer", "text": "Sounds reasonable, thank you for checking."},
+    {"channel": "agent", "text": "Of course -- thanks for calling, have a great day!"}
+  ]
+}

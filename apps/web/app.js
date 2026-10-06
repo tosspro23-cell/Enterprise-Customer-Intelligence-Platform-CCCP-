@@ -226,8 +226,9 @@ function handleStage(p) {
   traceEl.scrollTop = traceEl.scrollHeight;
 }
 
-async function runScript(scriptId, buttons) {
+async function runScript(scriptId, buttons, activeCard) {
   buttons.forEach((b) => (b.disabled = true));
+  if (activeCard) activeCard.classList.add("running");
   resetPanels();
   try {
     const runResp = await fetch(`/api/run/${scriptId}`, { method: "POST" });
@@ -252,6 +253,7 @@ async function runScript(scriptId, buttons) {
     }
   } finally {
     buttons.forEach((b) => (b.disabled = false));
+    if (activeCard) activeCard.classList.remove("running");
   }
 }
 
@@ -308,18 +310,40 @@ function dispatch(evt) {
   }
 }
 
+// Same categories the eval suite (evals/cases.json) already uses to group
+// scenarios, so the label on a card means the same thing it means there.
+const SCENARIO_CATEGORY = {
+  golden_savings: { tag: "DECISION", color: "var(--accent)" },
+  already_held_switch: { tag: "DECISION", color: "var(--accent)" },
+  region_restriction: { tag: "DECISION", color: "var(--accent)" },
+  recent_decline_cooldown: { tag: "DECISION", color: "var(--accent)" },
+  suppressed_complaint: { tag: "SAFETY", color: "var(--bad)" },
+  deteriorating_trend: { tag: "SAFETY", color: "var(--bad)" },
+  vulnerable_handoff: { tag: "SAFETY", color: "var(--handoff)" },
+  below_threshold: { tag: "ROBUSTNESS", color: "var(--warn)" },
+  no_history: { tag: "ANALYSIS", color: "var(--local)" },
+  injection_safety: { tag: "SECURITY", color: "var(--handoff)" },
+  unknown_and_missing_guidance: { tag: "GOVERNANCE", color: "var(--ok)" },
+};
+
 async function loadScripts() {
   const resp = await fetch("/api/scripts");
   const scripts = await resp.json();
   clearChildren(controls);
-  const buttons = [];
+  const cards = [];
   for (const s of scripts) {
-    const btn = document.createElement("button");
-    btn.className = "primary";
-    btn.textContent = `Run: ${s.title}`;
-    buttons.push(btn);
-    btn.addEventListener("click", () => runScript(s.id, buttons));
-    controls.appendChild(btn);
+    const cat = SCENARIO_CATEGORY[s.id] || { tag: "SCENARIO", color: "var(--muted)" };
+    const card = document.createElement("button");
+    card.className = "scenario-card";
+    card.innerHTML = `
+      <div class="scenario-card-top">
+        <span class="scenario-tag" style="background:${cat.color}">${cat.tag}</span>
+        <span class="scenario-customer">${s.customer_id || ""}</span>
+      </div>
+      <div class="scenario-title">${s.title}</div>`;
+    cards.push(card);
+    card.addEventListener("click", () => runScript(s.id, cards, card));
+    controls.appendChild(card);
   }
 }
 

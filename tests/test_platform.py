@@ -80,6 +80,44 @@ class TestRunCall(unittest.TestCase):
         self.assertNotIn("copilot.suggestion_generated", [e.event_type for e in events])
 
 
+# Every scripted call in data/calls/, and the outcome/product it's supposed to
+# demonstrate. Guards against the underlying synthetic fixtures (customers,
+# model scores, guidance) drifting out from under a scenario without anyone
+# noticing the Workbench demo for it silently stopped proving what its title
+# claims.
+SCENARIO_EXPECTATIONS = {
+    "golden_savings.json": ("recommended", "savings_plus"),
+    "suppressed_complaint.json": ("suppressed", None),
+    "vulnerable_handoff.json": ("specialist_handoff", None),
+    "deteriorating_trend.json": ("deferred", None),
+    "already_held_switch.json": ("recommended", "premium_card"),
+    "region_restriction.json": ("recommended", "premium_card"),
+    "recent_decline_cooldown.json": ("recommended", "travel_insurance"),
+    "below_threshold.json": ("no_recommendation", None),
+    "no_history.json": ("recommended", "savings_plus"),
+    "injection_safety.json": ("recommended", "savings_plus"),
+    "unknown_and_missing_guidance.json": ("recommended", "savings_plus"),
+}
+
+
+class TestAllScenarios(unittest.TestCase):
+    def test_every_call_script_is_covered_by_an_expectation(self):
+        on_disk = {p.name for p in CALLS_DIR.glob("*.json")}
+        self.assertEqual(on_disk, set(SCENARIO_EXPECTATIONS),
+                          "a script was added/removed in data/calls/ without updating SCENARIO_EXPECTATIONS")
+
+    def test_each_scenario_produces_its_documented_outcome(self):
+        for filename, (expected_outcome, expected_product) in SCENARIO_EXPECTATIONS.items():
+            with self.subTest(filename=filename):
+                script = _load(filename)
+                _, decisions = run_call(script, _agent(), lambda e: None, AS_OF, pace=False)
+                self.assertTrue(decisions, f"{filename}: no decision was triggered at all")
+                last = decisions[-1]
+                self.assertEqual(last.outcome.value, expected_outcome, filename)
+                product = last.recommendation.product_id if last.recommendation else None
+                self.assertEqual(product, expected_product, filename)
+
+
 class TestPostcallAndStore(unittest.TestCase):
     def test_enrichment_and_persistence_round_trip(self):
         script = _load("golden_savings.json")

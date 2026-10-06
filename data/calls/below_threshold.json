@@ -1,0 +1,21 @@
+{
+  "call_id": "call_demo_below_threshold",
+  "customer_id": "cust_007",
+  "agent_id": "agt_077",
+  "title": "No eligible product clears the propensity threshold -- system says so honestly instead of guessing",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Lucia -- how can I help today?"},
+    {"channel": "customer", "text": "Hi, I'm just calling to check my balance, but while I have you -- any offers for me?",
+     "sentiment": 0.2, "themes": ["product_enquiry"], "trigger": true},
+    {"channel": "agent", "text": "Let me check your balance first, and I'll also take a look at what might be relevant for your account."},
+    {"channel": "customer", "text": "Sure, no rush."},
+    {"channel": "agent", "text": "Your balance looks fine. Let me also check the account side properly."},
+    {"channel": "customer", "text": "Okay. Honestly I'm not too fussed either way, just curious.",
+     "sentiment": 0.1, "themes": ["product_enquiry"], "trigger": true},
+    {"channel": "agent", "text": "Appreciate you saying that -- I'd rather only suggest something if it's actually a good fit for you."},
+    {"channel": "customer", "text": "That's fair, I'd rather not get a generic pitch anyway."},
+    {"channel": "agent", "text": "Nothing stands out as a strong fit for your account right now -- I'd rather tell you that than push something that isn't."},
+    {"channel": "customer", "text": "I respect that, thanks for being straight with me."},
+    {"channel": "agent", "text": "Of course -- thanks for calling, have a good day!"}
+  ]
+}

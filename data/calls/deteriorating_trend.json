@@ -1,0 +1,19 @@
+{
+  "call_id": "call_demo_deteriorating",
+  "customer_id": "cust_009",
+  "agent_id": "agt_054",
+  "title": "Deteriorating 12-month relationship -- deferred even though the customer sounds fine right now",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Dan -- how can I help today?"},
+    {"channel": "customer", "text": "Hi there, I just had a quick question about my statement, nothing urgent.",
+     "sentiment": 0.1, "themes": ["service_quality"]},
+    {"channel": "agent", "text": "Sure, happy to help -- let me pull that up for you."},
+    {"channel": "customer", "text": "Great, thanks. While I'm on, do you have anything new for premium customers? I keep seeing ads.",
+     "sentiment": 0.2, "themes": ["product_enquiry"], "trigger": true},
+    {"channel": "agent", "text": "Let me take a look at what might make sense for your account."},
+    {"channel": "customer", "text": "No rush at all, take your time."},
+    {"channel": "agent", "text": "I appreciate that. For now let's make sure everything on your statement looks right -- anything that stood out to you?"},
+    {"channel": "customer", "text": "Not really, it all looked fine actually.", "sentiment": 0.15, "themes": []},
+    {"channel": "agent", "text": "Good to hear. Thanks for calling, have a great day!"}
+  ]
+}

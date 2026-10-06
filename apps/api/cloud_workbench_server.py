@@ -300,7 +300,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/mode":
             return self._json(200, {"mode": "azure-live"})
         if path == "/api/scripts":
-            return self._json(200, [{"id": k, "title": v.get("title", k)} for k, v in SCRIPTS.items()])
+            return self._json(200, [{"id": k, "title": v.get("title", k), "customer_id": v.get("customer_id")}
+                                     for k, v in SCRIPTS.items()])
         m = re.fullmatch(r"/api/calls/([^/]+)/stream", path)
         if m:
             return self._stream(m.group(1))

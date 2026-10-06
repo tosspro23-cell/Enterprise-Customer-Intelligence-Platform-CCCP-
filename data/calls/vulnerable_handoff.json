@@ -1,0 +1,18 @@
+{
+  "call_id": "call_demo_vulnerable",
+  "customer_id": "cust_003",
+  "agent_id": "agt_029",
+  "title": "Vulnerable customer -- specialist handoff, no commercial action regardless of what's discussed",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Maria -- how can I help today?"},
+    {"channel": "customer", "text": "Hi, sorry, I'm not totally sure who I spoke to last time. I think I need help understanding my account again.",
+     "sentiment": -0.1, "themes": ["service_quality"], "trigger": true},
+    {"channel": "agent", "text": "Of course, no need to apologise -- let me connect you with someone from our specialist support team who can walk through this with you properly."},
+    {"channel": "customer", "text": "Oh, okay. Actually, while I have you -- is there a better account for someone like me? My niece mentioned something."},
+    {"channel": "agent", "text": "That's a great question, and I want to make sure it's answered properly by the right specialist rather than rushed here."},
+    {"channel": "customer", "text": "That's kind of you, thank you."},
+    {"channel": "agent", "text": "You're welcome. They'll call you back within the hour -- is this number still the best one to reach you on?"},
+    {"channel": "customer", "text": "Yes, this number is fine."},
+    {"channel": "agent", "text": "Perfect, thank you for your patience -- have a good day."}
+  ]
+}

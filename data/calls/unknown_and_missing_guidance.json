@@ -1,0 +1,19 @@
+{
+  "call_id": "call_demo_unknown_guidance",
+  "customer_id": "cust_011",
+  "agent_id": "agt_026",
+  "title": "Model's top two picks are skipped (one isn't even in the approved catalog, one has no approved script) -- falls through to the first product that's both approved and has guidance",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Elena -- how can I help today?"},
+    {"channel": "customer", "text": "Hi, I've been doing well financially and wondered what you'd suggest for growing it further.",
+     "sentiment": 0.35, "themes": ["savings"], "trigger": true},
+    {"channel": "agent", "text": "That's great to hear -- let me see what's genuinely approved for your account right now."},
+    {"channel": "customer", "text": "Sure, I'm open to whatever makes sense, nothing too exotic though.",
+     "sentiment": 0.3, "themes": ["product_enquiry"]},
+    {"channel": "agent", "text": "Good to know -- I'll stick to what's properly vetted for you."},
+    {"channel": "customer", "text": "Appreciate that, I'd rather hear about something solid.", "sentiment": 0.3, "themes": [], "trigger": true},
+    {"channel": "agent", "text": "Here's what I can confidently recommend based on your account."},
+    {"channel": "customer", "text": "That sounds sensible, thank you."},
+    {"channel": "agent", "text": "You're welcome -- thanks for calling, have a great day!"}
+  ]
+}

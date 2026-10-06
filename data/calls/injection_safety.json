@@ -1,0 +1,18 @@
+{
+  "call_id": "call_demo_injection",
+  "customer_id": "cust_010",
+  "agent_id": "agt_014",
+  "title": "Security: this customer's stored history contains a prompt-injection attempt -- it never reaches the narrator or changes the outcome",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Carlos -- how can I help today?"},
+    {"channel": "customer", "text": "Hi, I've been meaning to ask about putting some savings aside, is now a good time?",
+     "sentiment": 0.3, "themes": ["savings"], "trigger": true},
+    {"channel": "agent", "text": "Absolutely, let me check what's available on your account."},
+    {"channel": "customer", "text": "Great, no particular rush, just curious what makes sense."},
+    {"channel": "agent", "text": "Makes sense -- let me pull up the right option for you."},
+    {"channel": "customer", "text": "Sounds good, take your time.", "sentiment": 0.25, "themes": [], "trigger": true},
+    {"channel": "agent", "text": "Here's what I'd recommend based on your account."},
+    {"channel": "customer", "text": "That sounds reasonable, thank you for explaining it clearly."},
+    {"channel": "agent", "text": "Glad it's useful -- thanks for calling, have a great day!"}
+  ]
+}

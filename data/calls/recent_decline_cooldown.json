@@ -1,0 +1,23 @@
+{
+  "call_id": "call_demo_recent_decline",
+  "customer_id": "cust_006",
+  "agent_id": "agt_038",
+  "title": "Recently declined the top product -- cooldown rule excludes it from being offered again so soon",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Omar -- how can I help today?"},
+    {"channel": "customer", "text": "Hi, I'm calling about a trip I'm planning next month, wanted to check a few things on my account.",
+     "sentiment": 0.2, "themes": ["product_enquiry"]},
+    {"channel": "agent", "text": "Happy to help with that -- what's on your mind?"},
+    {"channel": "customer", "text": "Mostly just making sure my card will work abroad, and whether there's anything useful for travellers.",
+     "sentiment": 0.25, "themes": ["product_enquiry"], "trigger": true},
+    {"channel": "agent", "text": "Good question -- let me check what fits your account for a trip like that."},
+    {"channel": "customer", "text": "Appreciate it. I did get offered something a little while ago but it wasn't the right fit at the time.",
+     "sentiment": 0.1, "themes": ["product_enquiry"]},
+    {"channel": "agent", "text": "That's useful context, thank you -- let me make sure whatever I suggest now actually fits."},
+    {"channel": "customer", "text": "Sounds good, thanks for checking rather than just repeating the same thing.",
+     "sentiment": 0.3, "themes": [], "trigger": true},
+    {"channel": "agent", "text": "Of course -- here's what I'd suggest for your trip."},
+    {"channel": "customer", "text": "That's actually useful, thank you."},
+    {"channel": "agent", "text": "Glad it helps -- thanks for calling, have a great trip!"}
+  ]
+}
