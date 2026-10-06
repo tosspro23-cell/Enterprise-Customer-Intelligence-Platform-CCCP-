@@ -49,6 +49,12 @@ class SyntheticEstate:
                           g.get("source_url", ""))
             for g in _load("guidance.json", data_dir)]
 
+    @property
+    def guidance_chunks(self) -> list[GuidanceChunk]:
+        """The raw, unfiltered guidance fixtures -- for callers that need to
+        browse all approved guidance rather than search it for one product/situation."""
+        return list(self._guidance)
+
     def customer_port(self) -> "SyntheticCustomers":
         return SyntheticCustomers(self._customers)
 

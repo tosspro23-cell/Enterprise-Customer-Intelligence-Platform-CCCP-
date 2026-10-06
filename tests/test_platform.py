@@ -1,0 +1,141 @@
+"""Contract tests for the reference-slice platform code (cccp_platform).
+
+These check the simulator/post-call/store/assistant wiring in isolation from
+the Workbench server -- the behaviour that actually matters for the demo:
+the right decisions get triggered at the right points, the right facts get
+persisted, and the assistant answers from what was actually persisted.
+"""
+import json
+import sys
+import tempfile
+import unittest
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from cccp_agent import CommercialDecisionAgent  # noqa: E402
+from cccp_agent.adapters.synthetic import StubNarrator, SyntheticEstate  # noqa: E402
+from cccp_platform import assistant as assistant_mod  # noqa: E402
+from cccp_platform.call_state import CallState, update_sentiment, update_themes  # noqa: E402
+from cccp_platform.postcall import build_enrichment  # noqa: E402
+from cccp_platform.processor import run_call  # noqa: E402
+from cccp_platform.store import AnalyticalStore  # noqa: E402
+
+AS_OF = date(2026, 10, 5)
+CALLS_DIR = ROOT / "data" / "calls"
+
+
+def _agent() -> CommercialDecisionAgent:
+    e = SyntheticEstate()
+    return CommercialDecisionAgent(e.customer_port(), e.interaction_port(), e.model_port(),
+                                    e.guidance_port(), e.catalog, StubNarrator())
+
+
+def _load(name: str) -> dict:
+    return json.loads((CALLS_DIR / name).read_text())
+
+
+class TestCallState(unittest.TestCase):
+    def test_rolling_sentiment_is_bounded_by_inputs(self):
+        s = CallState("c", "cust", "agt")
+        update_sentiment(s, -0.6)
+        update_sentiment(s, 0.4)
+        self.assertEqual(s.sentiment_series, [-0.6, 0.4])
+        self.assertTrue(-0.6 < s.current_sentiment < 0.4)
+
+    def test_theme_recency_and_cap(self):
+        s = CallState("c", "cust", "agt")
+        for themes in (["a"], ["b"], ["a", "c"], ["d"], ["e"], ["f"]):
+            update_themes(s, themes)
+        self.assertEqual(len(s.active_themes), 5)
+        self.assertEqual(s.active_themes[0], "f")   # most recent first
+        self.assertNotIn("b", s.active_themes)      # evicted by the cap
+
+
+class TestRunCall(unittest.TestCase):
+    def test_golden_script_defers_then_recommends(self):
+        script = _load("golden_savings.json")
+        events = []
+        state, decisions = run_call(script, _agent(), events.append, AS_OF, pace=False)
+        outcomes = [d.outcome.value for d in decisions]
+        self.assertEqual(outcomes, ["deferred", "recommended"])
+        self.assertEqual(decisions[-1].recommendation.product_id, "savings_plus")
+        self.assertEqual(state.status, "ended")
+        event_types = [e.event_type for e in events]
+        self.assertIn("copilot.suggestion_generated", event_types)
+        # sequence numbers are strictly increasing and gapless
+        seqs = [e.sequence_number for e in events]
+        self.assertEqual(seqs, list(range(1, len(seqs) + 1)))
+
+    def test_suppressed_script_never_calls_the_model(self):
+        script = _load("suppressed_complaint.json")
+        events = []
+        agent = _agent()
+        _, decisions = run_call(script, agent, events.append, AS_OF, pace=False)
+        self.assertTrue(all(d.outcome.value == "suppressed" for d in decisions))
+        self.assertTrue(all(d.recommendation is None for d in decisions))
+        self.assertEqual(agent.model.calls, 0)
+        self.assertNotIn("copilot.suggestion_generated", [e.event_type for e in events])
+
+
+class TestPostcallAndStore(unittest.TestCase):
+    def test_enrichment_and_persistence_round_trip(self):
+        script = _load("golden_savings.json")
+        state, decisions = run_call(script, _agent(), lambda e: None, AS_OF, pace=False)
+        rec = build_enrichment(state, decisions)
+        self.assertEqual(rec.outcome, "recommended")
+        self.assertEqual(rec.product_id, "savings_plus")
+
+        with tempfile.TemporaryDirectory() as d:
+            store = AnalyticalStore(Path(d) / "test.db")
+            store.insert_call(rec)
+            self.assertEqual(store.outcome_counts(), {"recommended": 1})
+            self.assertIsNotNone(store.avg_final_sentiment())
+            self.assertEqual(len(store.recent_calls()), 1)
+
+    def test_no_decisions_on_a_call_yields_no_decision_outcome(self):
+        state = CallState("c", "cust_001", "agt")
+        state.status = "ended"
+        rec = build_enrichment(state, [])
+        self.assertEqual(rec.outcome, "no_decision")
+        self.assertIsNone(rec.product_id)
+
+
+class TestAssistant(unittest.TestCase):
+    def setUp(self):
+        self.estate = SyntheticEstate()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = AnalyticalStore(Path(self.tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_metrics_question_with_no_calls_yet(self):
+        a = assistant_mod.ask("how many calls were suppressed?", self.store,
+                               self.estate.guidance_chunks, self.estate.catalog)
+        self.assertEqual(a.tool, "metrics.query")
+        self.assertIn("No calls recorded", a.answer)
+
+    def test_metrics_question_after_a_call(self):
+        state, decisions = run_call(_load("suppressed_complaint.json"), _agent(), lambda e: None, AS_OF, pace=False)
+        self.store.insert_call(build_enrichment(state, decisions))
+        a = assistant_mod.ask("how many calls were suppressed?", self.store,
+                               self.estate.guidance_chunks, self.estate.catalog)
+        self.assertIn("suppressed: 1", a.answer)
+
+    def test_guidance_question_cites_a_document(self):
+        a = assistant_mod.ask("what can I say about Savings Plus?", self.store,
+                               self.estate.guidance_chunks, self.estate.catalog)
+        self.assertEqual(a.tool, "guidance.search")
+        self.assertIn("commercial-offers-savings", a.citations)
+
+    def test_unroutable_question_names_its_own_limits(self):
+        a = assistant_mod.ask("what's the weather like today?", self.store,
+                               self.estate.guidance_chunks, self.estate.catalog)
+        self.assertEqual(a.tool, "none")
+
+
+if __name__ == "__main__":
+    unittest.main()

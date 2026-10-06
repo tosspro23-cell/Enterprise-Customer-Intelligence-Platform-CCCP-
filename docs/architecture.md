@@ -389,28 +389,47 @@ string -- this is the same evidence model the Commercial Decision Agent
 emits today (see `domain.Evidence` and the `evidence` field on
 `DecisionResult`).
 
-## 15. The implemented slice: Commercial Decision Agent
+## 15. What is implemented vs. what is design
 
-The architecture above is a design target. What is implemented and tested
-in this repository is the **Commercial Decision Service** (modules M10/M11
+Two things are implemented and tested in this repository; everything else
+in this document is a design target.
+
+**The Commercial Decision Agent** (`src/cccp_agent/`, modules M10/M11
 above, and the Commercial agent's tool in the assistant): given a customer,
 their interaction history, an optional live-call signal, the existing
 propensity model and the approved guidance index, it produces a
-recommendation (or a reason it withheld one) with full evidence.
+recommendation (or a reason it withheld one) with full evidence. See
+`domain.py` (contracts), `ports.py` (interfaces), `insights.py`
+(sentiment/theme analytics), `policy.py` (the versioned rule set),
+`narrative.py` (LLM payload + validator + template fallback), `agent.py`
+(the orchestrating workflow with tracing and degradation). The same `run()`
+call is designed to be invoked from three places without any change to its
+logic: module M10 in the real-time path (with a `LiveCallSignal` attached),
+the Commercial agent's `commercial.decide` tool in the assistant, and the
+post-call pipeline for outcome analytics -- which is the point of keeping
+this logic in one tested module rather than duplicating it per channel.
 
-See [../README.md](../README.md) for what it does and how to run it, and
-`src/cccp_agent/` for the code: `domain.py` (contracts), `ports.py`
-(interfaces), `insights.py` (sentiment/theme analytics), `policy.py` (the
-versioned rule set), `narrative.py` (LLM payload + validator + template
-fallback), `agent.py` (the orchestrating workflow with tracing and
-degradation).
+**A reference vertical slice** (`src/cccp_platform/`, `apps/`): a scripted
+call simulator standing in for M1-M9 (media ingest, STT, the fast-path
+signal engine, hot state, the trigger policy), driving the real
+`CommercialDecisionAgent` exactly as the production stream processor would;
+a stdlib HTTP backend pushing the resulting events to a browser page (the
+Workbench -- standing in for M12, the agent-desktop push, with the
+Workbench itself playing the role the design always gave it: a reference/
+demo surface, never the production UI); a post-call step that persists an
+enrichment record to a local SQLite store using the same fact-table names
+production would use; and a minimal keyword-routed Q&A standing in for the
+assistant's router + tools (§9) -- real typed tools over the same store and
+guidance index, but a keyword match instead of a hosted language-model
+router, and labelled as such in its own answers.
 
-The same `run()` call is designed to be invoked from three places without
-any change to its logic: module M10 in the real-time path (with a
-`LiveCallSignal` attached), the Commercial agent's `commercial.decide` tool
-in the assistant, and the post-call pipeline for outcome analytics -- which
-is the point of keeping this logic in one tested module rather than
-duplicating it per channel.
+See [../README.md](../README.md) for how to run both.
+
+**What this does not prove:** real-time latency at any volume, a real STT
+or event-streaming service, a real warehouse or search index, a real agent
+runtime, or a production authorisation/identity flow. The reference slice
+exists to make the decision boundaries and the event/state model legible
+end to end, not to validate the production technology choices in §4.
 
 ## 16. Key trade-offs
 

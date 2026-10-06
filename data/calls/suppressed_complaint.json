@@ -1,0 +1,17 @@
+{
+  "call_id": "call_demo_suppressed",
+  "customer_id": "cust_002",
+  "agent_id": "agt_017",
+  "title": "Open complaint on file -- commercial action suppressed even when the customer asks",
+  "utterances": [
+    {"channel": "agent", "text": "Thanks for calling, this is Priya -- how can I help today?"},
+    {"channel": "customer", "text": "I still have an open complaint, case C-2001, and nobody's called me back.",
+     "sentiment": -0.5, "themes": ["service_quality"], "trigger": true},
+    {"channel": "agent", "text": "I'm sorry about that -- let me escalate this properly right now."},
+    {"channel": "customer", "text": "Okay. Also, do you have any better credit card offers? I saw an ad.",
+     "sentiment": -0.2, "themes": ["card_issue"], "trigger": true},
+    {"channel": "agent", "text": "I'd rather make sure your complaint is resolved first before we talk about anything else."},
+    {"channel": "customer", "text": "Fair enough, thank you.", "sentiment": 0.0},
+    {"channel": "agent", "text": "Thanks for calling, goodbye."}
+  ]
+}

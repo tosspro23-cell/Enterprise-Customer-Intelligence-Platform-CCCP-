@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCCP Workbench</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>CCCP Workbench</h1>
+  <span class="badge">reference demo</span>
+  <span class="badge">synthetic data only</span>
+</header>
+
+<div class="controls" id="controls">
+  <span class="empty">Loading scripts&hellip;</span>
+</div>
+
+<div class="grid">
+  <section class="panel">
+    <h2>Call transcript</h2>
+    <div id="transcript"><span class="empty">Run a call to see it here.</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>Live signals</h2>
+    <div class="sentiment-value" id="sentiment-value">&ndash;</div>
+    <div class="sentiment-bar"><div id="sentiment-fill" style="width:50%;background:var(--muted)"></div></div>
+    <div class="chips" id="themes"><span class="empty">No themes yet.</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>Commercial decision</h2>
+    <div id="status-area"><span class="empty">No decision yet.</span></div>
+    <div id="suggestion-area"></div>
+  </section>
+</div>
+
+<div id="log"><div class="empty" style="color:#8a8f98">Event log will appear here once a call runs.</div></div>
+
+<div class="assistant">
+  <h2 style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px">
+    Supervisor assistant (demo router)
+  </h2>
+  <div class="quick" id="quick"></div>
+  <form id="ask-form">
+    <input type="text" id="question" placeholder="e.g. how many calls were suppressed? / what can I say about Savings Plus?">
+    <button class="primary" type="submit">Ask</button>
+  </form>
+  <div class="answer" id="answer"><span class="empty">No question asked yet.</span></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
