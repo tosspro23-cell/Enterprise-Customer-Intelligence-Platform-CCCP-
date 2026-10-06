@@ -15,6 +15,8 @@ azure-backends = [
     "websocket-client>=1.8",   # azure-eventhub's websocket transport fallback
     "azure-search-documents>=11.5",
     "redis>=5.0",
+    "azure-cognitiveservices-speech>=1.40",   # TTS/STT round-trip in speech.py
+    "azure-ai-textanalytics>=5.3",            # real sentiment in sentiment_language.py
 ]
 
 [build-system]
