@@ -15,7 +15,7 @@ Narrator mode: `stub` | as_of: 2026-10-05 | synthetic data only
 | citation_coverage_on_recommendations | 1.0 |
 | policy_violations_in_final_text | 0 |
 | agent_latency_ms_p50 | 0.04 |
-| agent_latency_ms_max | 0.09 |
+| agent_latency_ms_max | 0.1 |
 
 ## Cases
 

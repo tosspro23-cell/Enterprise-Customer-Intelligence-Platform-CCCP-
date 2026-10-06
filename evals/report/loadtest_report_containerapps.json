@@ -1,0 +1,137 @@
+{
+    "levels": [
+        {
+            "concurrency": 1,
+            "calls": 6,
+            "errors": 0,
+            "error_samples": [],
+            "outcomes": {
+                "recommended": 6
+            },
+            "total_call_ms": {
+                "p50": 9741.9,
+                "p95": 13336.1,
+                "p99": 13336.1,
+                "max": 13336.1,
+                "n": 6
+            },
+            "event_publish_ms": {
+                "p50": 5.6,
+                "p95": 11.3,
+                "p99": 709.1,
+                "max": 730.0,
+                "n": 120
+            },
+            "redis_roundtrip_ms": {
+                "p50": 134.5,
+                "p95": 135.0,
+                "p99": 135.3,
+                "max": 135.3,
+                "n": 36
+            },
+            "narrator_ms": {
+                "p50": 6908.2,
+                "p95": 10321.5,
+                "p99": 10321.5,
+                "max": 10321.5,
+                "n": 6
+            },
+            "guidance_search_ms": {
+                "p50": 318.1,
+                "p95": 388.6,
+                "p99": 388.6,
+                "max": 388.6,
+                "n": 6
+            }
+        },
+        {
+            "concurrency": 3,
+            "calls": 6,
+            "errors": 0,
+            "error_samples": [],
+            "outcomes": {
+                "recommended": 6
+            },
+            "total_call_ms": {
+                "p50": 9085.9,
+                "p95": 12728.5,
+                "p99": 12728.5,
+                "max": 12728.5,
+                "n": 6
+            },
+            "event_publish_ms": {
+                "p50": 5.8,
+                "p95": 23.8,
+                "p99": 518.3,
+                "max": 613.5,
+                "n": 120
+            },
+            "redis_roundtrip_ms": {
+                "p50": 133.7,
+                "p95": 135.0,
+                "p99": 135.7,
+                "max": 135.7,
+                "n": 36
+            },
+            "narrator_ms": {
+                "p50": 6296.4,
+                "p95": 9875.3,
+                "p99": 9875.3,
+                "max": 9875.3,
+                "n": 6
+            },
+            "guidance_search_ms": {
+                "p50": 302.7,
+                "p95": 353.4,
+                "p99": 353.4,
+                "max": 353.4,
+                "n": 6
+            }
+        },
+        {
+            "concurrency": 6,
+            "calls": 6,
+            "errors": 0,
+            "error_samples": [],
+            "outcomes": {
+                "recommended": 6
+            },
+            "total_call_ms": {
+                "p50": 11190.2,
+                "p95": 18501.2,
+                "p99": 18501.2,
+                "max": 18501.2,
+                "n": 6
+            },
+            "event_publish_ms": {
+                "p50": 5.8,
+                "p95": 27.6,
+                "p99": 507.4,
+                "max": 507.6,
+                "n": 120
+            },
+            "redis_roundtrip_ms": {
+                "p50": 134.2,
+                "p95": 135.9,
+                "p99": 137.6,
+                "max": 137.6,
+                "n": 36
+            },
+            "narrator_ms": {
+                "p50": 8329.6,
+                "p95": 15663.3,
+                "p99": 15663.3,
+                "max": 15663.3,
+                "n": 6
+            },
+            "guidance_search_ms": {
+                "p50": 337.1,
+                "p95": 375.7,
+                "p99": 375.7,
+                "max": 375.7,
+                "n": 6
+            }
+        }
+    ],
+    "source": "container-apps-same-region"
+}

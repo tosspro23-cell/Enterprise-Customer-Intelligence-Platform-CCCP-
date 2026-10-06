@@ -9,7 +9,7 @@
     "citation_coverage_on_recommendations": 1.0,
     "policy_violations_in_final_text": 0,
     "agent_latency_ms_p50": 0.04,
-    "agent_latency_ms_max": 0.09
+    "agent_latency_ms_max": 0.1
   },
   "results": [
     {
@@ -72,8 +72,8 @@
       "expected_outcome": "recommended",
       "policy_violation_in_final_text": false,
       "cited": true,
-      "latency_ms": 0.09,
-      "trace_id": "355d2203ff9745d8",
+      "latency_ms": 0.1,
+      "trace_id": "baa1c68c1a514ac6",
       "explanation": "Savings Plus is the top eligible option (propensity 82%). Relationship trend is improving; recent themes: fees, savings, resolution. Per commercial-offers-savings section 2.1, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -117,7 +117,7 @@
       "policy_violation_in_final_text": false,
       "cited": false,
       "latency_ms": 0.02,
-      "trace_id": "ab18694471bd4fe5",
+      "trace_id": "58426b1a1e604f3e",
       "explanation": "No commercial offer now (R1_open_complaint): open complaint case(s): C-2001. Prioritise service resolution using the relevant service guidance."
     },
     {
@@ -151,7 +151,7 @@
       "policy_violation_in_final_text": false,
       "cited": false,
       "latency_ms": 0.05,
-      "trace_id": "896178c3e3a44988",
+      "trace_id": "011808f211db4adc",
       "explanation": "No commercial offer now (R2_live_negative_sentiment): live sentiment -0.70 <= -0.40. Prioritise service resolution using the relevant service guidance."
     },
     {
@@ -185,7 +185,7 @@
       "policy_violation_in_final_text": false,
       "cited": false,
       "latency_ms": 0.01,
-      "trace_id": "9bf36db9891d4a89",
+      "trace_id": "0fbab2017b164093",
       "explanation": "No commercial offer now (R0_handoff_flag): customer flagged: vulnerable_customer. Prioritise service resolution using the relevant service guidance."
     },
     {
@@ -224,7 +224,7 @@
       "policy_violation_in_final_text": false,
       "cited": false,
       "latency_ms": 0.05,
-      "trace_id": "4a0b9a5279644b82",
+      "trace_id": "d2a24c2a9b254821",
       "explanation": "No commercial offer now (R3_deteriorating_relationship): 12-month sentiment trend deteriorating: retention before cross-sell. Prioritise service resolution using the relevant service guidance."
     },
     {
@@ -258,7 +258,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.03,
-      "trace_id": "4dadf66dc02b476b",
+      "trace_id": "da17c25f55a04d20",
       "explanation": "Premium Card is the top eligible option (propensity 71%). Relationship trend is stable; recent themes: product_enquiry, travel. Per commercial-offers-cards section 3.1, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -292,7 +292,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.03,
-      "trace_id": "6796052f34424c13",
+      "trace_id": "875ecd909dde44e2",
       "explanation": "Premium Card is the top eligible option (propensity 66%). Relationship trend is stable; recent themes: savings, travel, product_enquiry. Per commercial-offers-cards section 3.1, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -331,7 +331,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.03,
-      "trace_id": "ef6cd8b27adc464b",
+      "trace_id": "e7805960f0b54618",
       "explanation": "Travel Insurance is the top eligible option (propensity 61%). Relationship trend is stable; recent themes: travel, savings. Per commercial-offers-insurance section 4.1, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -360,7 +360,7 @@
       "policy_violation_in_final_text": false,
       "cited": false,
       "latency_ms": 0.01,
-      "trace_id": "0a4233e4d54a4fe7",
+      "trace_id": "79eb49d2af9f4353",
       "explanation": "No commercial offer now (N1_none_eligible): no eligible product with approved guidance. Prioritise service resolution using the relevant service guidance."
     },
     {
@@ -399,7 +399,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.0,
-      "trace_id": "0f98d24c70ef452c",
+      "trace_id": "bded59630d644886",
       "explanation": "Savings Plus is the top eligible option (propensity 58%). Relationship trend is insufficient_data; recent themes: . Per commercial-offers-savings section 2.2, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -438,7 +438,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.03,
-      "trace_id": "6ef336da203845bf",
+      "trace_id": "222ae0a1a9f94e8d",
       "explanation": "Savings Plus is the top eligible option (propensity 70%). Relationship trend is stable; recent themes: investments, savings. Per commercial-offers-savings section 2.2, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -479,7 +479,7 @@
       "policy_violation_in_final_text": false,
       "cited": false,
       "latency_ms": 0.05,
-      "trace_id": "ef2527ae7f7b4a2f",
+      "trace_id": "5a6e62f767a14dbf",
       "explanation": "No commercial offer now (D2_model_unavailable): recommendation model unavailable; no score is fabricated. Prioritise service resolution using the relevant service guidance."
     },
     {
@@ -520,7 +520,7 @@
       "policy_violation_in_final_text": false,
       "cited": false,
       "latency_ms": 0.04,
-      "trace_id": "6d72dd41c1c3461c",
+      "trace_id": "cce2a2ec4b8b419d",
       "explanation": "No commercial offer now (D3_guidance_unavailable): guidance index unavailable; no policy claim made. Prioritise service resolution using the relevant service guidance."
     },
     {
@@ -561,7 +561,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.0,
-      "trace_id": "e2d20fcf0c4f4357",
+      "trace_id": "abb92229f83049d4",
       "explanation": "Premium Card is the top eligible option (propensity 71%). Relationship trend is insufficient_data; recent themes: . Per commercial-offers-cards section 3.1, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -611,8 +611,8 @@
       "expected_outcome": "recommended",
       "policy_violation_in_final_text": false,
       "cited": true,
-      "latency_ms": 0.05,
-      "trace_id": "a1a7d87bf439472e",
+      "latency_ms": 0.06,
+      "trace_id": "daf4f466a8ff41e3",
       "explanation": "Recommend Savings Plus: top eligible product from xsell-propensity 2026.09.1-synthetic (propensity 82%). 12-month sentiment trend: improving. Key themes: fees, savings, resolution. Position the offer following commercial-offers-savings v5 section 2.1."
     },
     {
@@ -643,7 +643,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.04,
-      "trace_id": "1edb3a993b134413",
+      "trace_id": "ee8486dd60c3411d",
       "explanation": "Recommend Savings Plus: top eligible product from xsell-propensity 2026.09.1-synthetic (propensity 82%). 12-month sentiment trend: improving. Key themes: fees, savings, resolution. Position the offer following commercial-offers-savings v5 section 2.1."
     },
     {
@@ -673,8 +673,8 @@
       "expected_outcome": null,
       "policy_violation_in_final_text": false,
       "cited": true,
-      "latency_ms": 0.05,
-      "trace_id": "6131758525414707",
+      "latency_ms": 0.04,
+      "trace_id": "8b628e6ad9ca436a",
       "explanation": "Recommend Savings Plus: top eligible product from xsell-propensity 2026.09.1-synthetic (propensity 82%). 12-month sentiment trend: improving. Key themes: fees, savings, resolution. Position the offer following commercial-offers-savings v5 section 2.1."
     },
     {
@@ -704,8 +704,8 @@
       "expected_outcome": null,
       "policy_violation_in_final_text": false,
       "cited": true,
-      "latency_ms": 0.05,
-      "trace_id": "d59c22c26a454825",
+      "latency_ms": 0.04,
+      "trace_id": "45b63b84a4e443b6",
       "explanation": "Recommend Savings Plus: top eligible product from xsell-propensity 2026.09.1-synthetic (propensity 82%). 12-month sentiment trend: improving. Key themes: fees, savings, resolution. Position the offer following commercial-offers-savings v5 section 2.1."
     },
     {
@@ -736,7 +736,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.04,
-      "trace_id": "88221aa4c3b74318",
+      "trace_id": "1738072fdea24ee5",
       "explanation": "Recommend Savings Plus: top eligible product from xsell-propensity 2026.09.1-synthetic (propensity 82%). 12-month sentiment trend: improving. Key themes: fees, savings, resolution. Position the offer following commercial-offers-savings v5 section 2.1."
     },
     {
@@ -777,7 +777,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.04,
-      "trace_id": "8b8df446e2404a43",
+      "trace_id": "c3fd10d621fb4092",
       "explanation": "Recommend Savings Plus: top eligible product from xsell-propensity 2026.09.1-synthetic (propensity 82%). 12-month sentiment trend: improving. Key themes: fees, savings, resolution. Position the offer following commercial-offers-savings v5 section 2.1."
     },
     {
@@ -816,7 +816,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.03,
-      "trace_id": "ec1671289c1b4811",
+      "trace_id": "26994b45b1d442f7",
       "explanation": "Savings Plus is the top eligible option (propensity 74%). Relationship trend is stable; recent themes: travel, savings. Per commercial-offers-savings section 2.2, acknowledge the customer's situation first and present the product as optional."
     },
     {
@@ -860,7 +860,7 @@
       "policy_violation_in_final_text": false,
       "cited": true,
       "latency_ms": 0.04,
-      "trace_id": "56e1343ad5aa4f73",
+      "trace_id": "98a98694cb874863",
       "explanation": "Savings Plus is the top eligible option (propensity 82%). Relationship trend is improving; recent themes: fees, savings, resolution. Per commercial-offers-savings section 2.1, acknowledge the customer's situation first and present the product as optional."
     }
   ]

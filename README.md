@@ -132,16 +132,21 @@ and reports latency percentiles per stage. Full report:
 **What this does and doesn't show.** 0 errors across 18 calls (3 concurrency
 levels x 6 calls each) -- every service absorbed 6 concurrent calls without
 throttling or failing, and latency stayed essentially flat from concurrency
-1 to 6. That flatness is itself the finding: **at this scale, none of these
+1 to 6. That flatness is itself a finding: **at this scale, none of these
 managed services were the bottleneck** -- the client (this laptop, not an
-Azure-region service) was, over the public internet. A same-region
-Container App would see Redis round trips closer to low single-digit
-milliseconds, not ~560ms; this setup cannot measure that, only confirm the
-dependencies behave correctly under modest concurrency. It also does not
-test the concurrency the platform would actually see in production (tens
-of simultaneous calls, not six) -- that needs a same-region client and a
-higher concurrency sweep, which is a natural next step, not something this
-run claims to have done.
+Azure-region service) was, over the public internet. It also does not test
+the concurrency the platform would actually see in production (tens of
+simultaneous calls, not six) -- that needs a higher concurrency sweep,
+which is a natural next step, not something this run claims to have done.
+
+**That client-location guess was then actually tested, not just asserted**
+-- see "Re-run from inside Azure" below -- and it was directionally right
+but the specific number was off: Redis round trips landed around 134ms
+from a same-cloud client, not the "low single-digit milliseconds" guessed
+here, because the client (Container Apps, eastus2) and Redis (westus2)
+ended up in different Azure regions, not the same one. Measure, don't
+extrapolate -- this paragraph is left as a reminder of the gap between the
+two.
 
 **Two things broke before this worked, both instructive:**
 - Classic "Azure Cache for Redis" is being retired; the create call must
@@ -156,12 +161,65 @@ run claims to have done.
   requirement for multi-key atomicity remains either way and is reflected
   in `redis_state.py`.
 
-Cost note: Event Hubs, Redis and AI Search (Basic -- this subscription's
-free-tier AI Search quota was already used by another project) were
-deleted immediately after this run; only the pay-as-you-go Azure OpenAI
-resource was kept. None of this is covered by the automated test suite --
-it requires live credentials and real resources, so it's validated by this
-run and this report, not by CI.
+## Re-run from inside Azure: infrastructure latency vs. model latency
+
+The laptop-as-client caveat above was then actually tested. `apps/api/cloud_server.py`
+wraps the same load test in a small HTTP service; `Dockerfile` containerises
+it; a GitHub Actions workflow (`.github/workflows/build-push-ghcr.yml`)
+builds and pushes it to `ghcr.io` (not Azure Container Registry -- avoids
+ACR's standing per-day cost, the same tradeoff a prior project already
+made); it runs on Azure Container Apps in `eastus2`, same region as Event
+Hubs/Speech/Language, cross-region to Redis/AI Search/OpenAI in
+`westus`/`westus2` (a subscription-wide cap of one Container Apps
+environment on this free-trial account forced sharing an existing
+environment from another project, in whichever region that already used).
+"Same cloud, not fully same-region" -- not a clean controlled experiment,
+but still a real location change to compare against the laptop run:
+
+| Stage (p50) | From a laptop, over the internet | From Container Apps, inside Azure | Change |
+|---|---|---|---|
+| End-to-end call | 31.6-32.0s | 9.1-11.2s | **~3x faster** |
+| Event Hub publish | ~340ms | **~5.7ms** | ~60x faster |
+| Redis round trip | ~556-565ms | ~134ms | ~4x faster |
+| Guidance search (AI Search) | 1.5-1.6s | ~310ms | ~5x faster |
+| Narrator (`gpt-5-mini`) | 8.2-9.2s | 6.3-8.3s | **basically unchanged** |
+
+Full report: `evals/report/loadtest_report_containerapps.json`. 0 errors
+across another 18 calls.
+
+**The point of this comparison isn't the infrastructure numbers -- it's
+the one that didn't move.** Every network-bound call got dramatically
+faster once the client stopped being a laptop on a home connection.
+Narrator latency didn't, because it isn't network latency: a reasoning
+model spends time generating hidden reasoning tokens before any visible
+output, and that cost travels with the model, not the network path. Once
+infrastructure placement is fixed, narrator time is still 60-80% of the
+total call -- which is the same conclusion as the live-endpoint section
+above (a non-reasoning model is the right choice for the real-time
+profile), now reached two different ways instead of one.
+
+Cost note: this is also, deliberately, the one component of this
+exercise still running continuously rather than torn down right after
+use -- see the cost-tracking section below for why and for how long.
+
+## Cost tracking: a multi-day run on free-trial credit
+
+This subscription is a genuine Azure Free Trial (`quotaId: FreeTrial_2014-09-01`,
+spending limit on -- verified via `az rest`, not assumed) with a few days
+of credit left. Per-request teardown (the pattern used for the first load
+test above) was replaced with a deliberate multi-day run: Event Hubs,
+Redis, AI Search, Speech, Language, Azure OpenAI and the Container App are
+all being left running so real idle-plus-light-use cost over days, not
+minutes, can be read back from Cost Management once it posts (billing
+data lags; it was not yet available at write time). The spending-limit
+protection means the realistic failure mode is the subscription being
+disabled when credit runs out, not a surprise bill -- which is what makes
+leaving this running for a few days a reasonable way to answer "what does
+this actually cost," rather than a risk.
+
+None of this is covered by the automated test suite -- it requires live
+credentials and real resources, so it's validated by these runs and these
+reports, not by CI.
 
 ## Layout
 
@@ -181,10 +239,13 @@ src/cccp_platform/
   postcall.py    builds the post-call analytical record
   store.py       SQLite-backed analytical store (production-shaped table names)
   assistant.py   minimal keyword-routed supervisor Q&A over the store + guidance index
-  azure_backends/  real adapters: Event Hubs, Azure Managed Redis, Azure AI Search, a cloud-backed call runner
-apps/api/server.py   stdlib HTTP backend for the Workbench (no third-party deps)
+  azure_backends/  real adapters: Event Hubs, Azure Managed Redis, Azure AI Search, Azure Speech
+                   (TTS/STT round trip), Azure AI Language (sentiment), a cloud-backed call runner
+apps/api/server.py        stdlib HTTP backend for the Workbench (no third-party deps)
+apps/api/cloud_server.py  thin HTTP wrapper to trigger/fetch the load test from inside Azure
 apps/web/            the Workbench page (vanilla HTML/CSS/JS)
 tools/loadtest.py    concurrent load test against the real Azure backends
+Dockerfile, .github/workflows/build-push-ghcr.yml   builds the load-test image, pushes to ghcr.io
 docs/            platform architecture (functional, technology, real-time, governance)
 data/synthetic/  customers, interactions, model scores, catalog, guidance
 data/calls/      the two scripted calls the Workbench runs
@@ -202,14 +263,23 @@ event sequencing, trigger-to-decision wiring and post-call persistence
 OpenAI endpoint (16/16 eval cases, decision accuracy 1.0 -- see
 `evals/report/eval_report_azure.md`); the full hot-path dependency set
 (Event Hubs, Azure Managed Redis, Azure AI Search, Azure OpenAI) running
-for real and holding up under light concurrency (18/18 calls succeeded, 0
-errors, at concurrency 1/3/6 -- see `evals/report/loadtest_report.json`
-and the section above).
+for real and holding up under light concurrency, twice -- once from a
+laptop (`evals/report/loadtest_report.json`), once from inside Azure
+(`evals/report/loadtest_report_containerapps.json`), 36/36 calls
+succeeded combined, 0 errors; the real-time audio/sentiment path with
+real services (Azure TTS -> Azure STT -> Azure AI Language sentiment)
+producing the same decision outcomes as the hand-labelled script did; a
+container image built by CI and deployed to Azure Container Apps.
 
-Not validated: latency or cost at production call volume -- 6-way
-concurrency from a non-Azure client over the public internet, not tens of
-concurrent calls from a same-region service, which is what the real-time
-budget in docs/architecture.md §9.7 is actually about; Web PubSub or
-Container Apps (still a local stdlib server and in-process push); any
-production integration (identity/OBO, real guidance/transcript sources);
-the demo supervisor router as a stand-in for a real language router.
+Not validated: latency or cost at production call volume (tens of
+concurrent calls, not six, which is what the real-time budget in
+docs/architecture.md §9.7 is actually about); a true same-region
+deployment (the Container Apps run landed in a different Azure region
+from Redis/AI Search/OpenAI, not the same one -- see the comparison
+section above); Web PubSub; a trained theme classifier (still a keyword
+match, see `sentiment_language.py`); any production integration
+(identity/OBO, a real telephony/transcript source rather than
+TTS-synthesised audio, real guidance ingestion from SharePoint); the demo
+supervisor router as a stand-in for a real language router; real call
+audio of any kind -- every "call" here is scripted text, optionally
+voiced by TTS, never a live conversation.
