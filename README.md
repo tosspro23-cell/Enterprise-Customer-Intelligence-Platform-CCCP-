@@ -13,6 +13,14 @@ Design rule, applied everywhere in the architecture:
 
 Full architecture: [docs/architecture.md](docs/architecture.md).
 
+**Live demo, running on real Azure services (not a local stand-in):**
+https://cccp-workbench-ui.thankfulcliff-c5f74fed.eastus2.azurecontainerapps.io/
+-- click "Run", watch the "LIVE AZURE" badge and the real per-stage
+latency panel fill in as the call actually hits Event Hubs, Redis, AI
+Search and Azure OpenAI. This is a time-boxed validation deployment (see
+"Cost tracking" below), not a permanent service -- if the link is down,
+the local Workbench (next section) is the same UI against local stand-ins.
+
 ## What's implemented here
 
 The repository contains one fully working, tested slice of the platform: the
@@ -216,6 +224,13 @@ protection means the realistic failure mode is the subscription being
 disabled when credit runs out, not a surprise bill -- which is what makes
 leaving this running for a few days a reasonable way to answer "what does
 this actually cost," rather than a risk.
+
+Two Container Apps now run in the shared environment: `cccp-workbench-app`
+(headless, `apps/api/cloud_server.py` -- triggers/reports the load test
+over a small JSON API) and `cccp-workbench-ui` (`apps/api/cloud_workbench_server.py`
+-- the public link above). Same image, same secrets, different start
+command (`--command`/`--args` on `az containerapp create`) -- no second
+image or build pipeline needed for the second app.
 
 None of this is covered by the automated test suite -- it requires live
 credentials and real resources, so it's validated by these runs and these
