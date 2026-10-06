@@ -8,6 +8,9 @@ const suggestionAreaEl = document.getElementById("suggestion-area");
 const logEl = document.getElementById("log");
 const answerEl = document.getElementById("answer");
 const quickEl = document.getElementById("quick");
+const modeBadgeEl = document.getElementById("mode-badge");
+const latencyPanelEl = document.getElementById("latency-panel");
+const latencyRowsEl = document.getElementById("latency-rows");
 
 function clearChildren(el) { el.innerHTML = ""; }
 
@@ -31,6 +34,7 @@ function resetPanels() {
   statusAreaEl.innerHTML = '<span class="empty">No decision yet.</span>';
   suggestionAreaEl.innerHTML = "";
   logEl.innerHTML = "";
+  latencyRowsEl.innerHTML = '<span class="empty">No cloud calls yet.</span>';
 }
 
 function appendBubble(channel, text) {
@@ -119,6 +123,31 @@ function showSuggestion(payload) {
   suggestionAreaEl.appendChild(details);
 }
 
+const LATENCY_SCALE_MS = 12000;   // bar width reference -- narrator calls run several seconds
+
+function upsertLatencyRow(label, ms, detail) {
+  if (latencyRowsEl.querySelector(".empty")) clearChildren(latencyRowsEl);
+  let row = latencyRowsEl.querySelector(`[data-stage="${label}"]`);
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "latency-row";
+    row.dataset.stage = label;
+    row.innerHTML = `<div><div>${label}</div><div class="latency-bar-track"><div class="latency-bar-fill" style="width:0%"></div></div></div><div class="latency-ms"></div>`;
+    latencyRowsEl.appendChild(row);
+  }
+  const pct = Math.min(100, Math.round((ms / LATENCY_SCALE_MS) * 100));
+  row.querySelector(".latency-bar-fill").style.width = pct + "%";
+  row.querySelector(".latency-ms").textContent = detail || `${ms.toFixed(0)} ms`;
+}
+
+function showSpanLatencies(spans) {
+  if (!spans || !spans.length) return;
+  latencyPanelEl.style.display = "block";
+  for (const s of spans) {
+    if (s.duration_ms > 1) upsertLatencyRow(s.name, s.duration_ms);
+  }
+}
+
 function showPostcall(payload) {
   const banner = document.createElement("div");
   banner.className = "citelist";
@@ -158,6 +187,14 @@ async function runScript(scriptId, buttons) {
 
 function dispatch(evt) {
   const p = evt.payload || {};
+  if (typeof p._eh_publish_ms === "number") {
+    latencyPanelEl.style.display = "block";
+    upsertLatencyRow("Event Hub publish", p._eh_publish_ms);
+  }
+  if (typeof p._redis_ms === "number") {
+    latencyPanelEl.style.display = "block";
+    upsertLatencyRow("Redis round trip", p._redis_ms);
+  }
   switch (evt.event_type) {
     case "transcript.utterance_final":
       appendBubble(p.channel, p.text);
@@ -170,6 +207,7 @@ function dispatch(evt) {
       break;
     case "commercial.decision_made":
       updateDecision(p);
+      showSpanLatencies(p.spans);
       break;
     case "copilot.suggestion_generated":
       showSuggestion(p);
@@ -242,5 +280,23 @@ async function askAssistant(question) {
   answerEl.appendChild(note);
 }
 
+async function loadMode() {
+  try {
+    const resp = await fetch("/api/mode");
+    const data = await resp.json();
+    if (data.mode === "azure-live") {
+      modeBadgeEl.textContent = "LIVE AZURE -- real Event Hubs/Redis/AI Search/OpenAI";
+      modeBadgeEl.style.background = "color-mix(in srgb, var(--ok) 20%, transparent)";
+      modeBadgeEl.style.color = "var(--ok)";
+      latencyPanelEl.style.display = "block";
+    } else {
+      modeBadgeEl.textContent = "local demo (no cloud calls)";
+    }
+  } catch {
+    modeBadgeEl.textContent = "local demo (no cloud calls)";
+  }
+}
+
+loadMode();
 loadScripts();
 setupAssistant();

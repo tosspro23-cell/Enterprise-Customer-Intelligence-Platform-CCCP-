@@ -123,6 +123,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(WEB_DIR / "style.css", "text/css; charset=utf-8")
         if path == "/api/scripts":
             return self._json(200, [{"id": k, "title": v.get("title", k)} for k, v in SCRIPTS.items()])
+        if path == "/api/mode":
+            return self._json(200, {"mode": "local"})
         m = re.fullmatch(r"/api/calls/([^/]+)/stream", path)
         if m:
             return self._stream(m.group(1))
