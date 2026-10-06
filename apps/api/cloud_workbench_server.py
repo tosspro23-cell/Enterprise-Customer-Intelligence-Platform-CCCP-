@@ -85,9 +85,14 @@ def start_call(script_id: str) -> str:
     run_id = f"{script['call_id']}_{uuid.uuid4().hex[:6]}"
     q: queue.Queue = queue.Queue()
     call_queues[run_id] = q
+    events_log: list[dict] = []  # replayed later from the Supervisor view
+
+    def to_browser(d: dict) -> None:
+        events_log.append(d)
+        q.put(d)
 
     def browser_put(event_type: str, payload: dict) -> None:
-        q.put({"event_type": event_type, "call_id": run_id, "payload": payload})
+        to_browser({"event_type": event_type, "call_id": run_id, "payload": payload})
 
     last_running_instance: list[str | None] = [None]
 
@@ -105,7 +110,7 @@ def start_call(script_id: str) -> str:
                 eh_sink(evt)
                 d = evt.to_dict()
                 d["payload"]["_eh_publish_ms"] = round(eh_sink.publish_latencies_s[-1] * 1000, 1)
-                q.put(d)
+                to_browser(d)
 
             def stage_done(stage: str, instance_id: str, ms: float, detail: dict | None = None) -> None:
                 # A real fact about this call -> goes through the real Event Hubs
@@ -213,9 +218,10 @@ def start_call(script_id: str) -> str:
             state.end()
             seq.emit(CALL_ENDED, {})
             rec = build_enrichment(_StateAdapter(state, run_id, script, trace_id), decisions)
-            store.insert_call(rec)
-            q.put({"event_type": "postcall.enrichment_completed", "call_id": run_id,
-                   "payload": {"summary": rec.summary, "outcome": rec.outcome, "product_id": rec.product_id}})
+            store.insert_call(rec, scenario_id=script_id)
+            browser_put("postcall.enrichment_completed",
+                        {"summary": rec.summary, "outcome": rec.outcome, "product_id": rec.product_id})
+            store.save_events(run_id, events_log)
             eh_sink.close()
         except Exception as e:  # noqa: BLE001 - a demo must show its own failures, never hang silently
             if last_running_instance[0]:
@@ -223,6 +229,7 @@ def start_call(script_id: str) -> str:
                                                 "instance_id": last_running_instance[0],
                                                 "detail": {"error": f"{type(e).__name__}: {e}"}})
             browser_put("pipeline.error", {"error": f"{type(e).__name__}: {e}"})
+            store.save_events(run_id, events_log)  # partial trace is still worth keeping for review
         finally:
             q.put(None)
 
@@ -305,6 +312,22 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/calls/([^/]+)/stream", path)
         if m:
             return self._stream(m.group(1))
+        if path == "/api/supervisor/summary":
+            counts = store.outcome_counts()
+            return self._json(200, {
+                "total_calls": sum(counts.values()),
+                "outcome_counts": counts,
+                "avg_final_sentiment": store.avg_final_sentiment(),
+                "generated_by_counts": store.generated_by_counts(),
+            })
+        if path == "/api/supervisor/calls":
+            return self._json(200, store.recent_calls(50))
+        m = re.fullmatch(r"/api/supervisor/calls/([^/]+)/events", path)
+        if m:
+            events = store.get_events(m.group(1))
+            if events is None:
+                return self._json(404, {"error": "no stored trace for this call_id"})
+            return self._json(200, events)
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802

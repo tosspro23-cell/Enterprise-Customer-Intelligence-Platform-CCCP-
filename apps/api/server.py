@@ -53,16 +53,23 @@ def start_call(script_id: str) -> str:
     q: queue.Queue = queue.Queue()
     call_queues[run_id] = q
 
+    events_log: list[dict] = []  # replayed later from the Supervisor view
+
     def worker() -> None:
         def sink(evt) -> None:
-            q.put(evt.to_dict())
+            d = evt.to_dict()
+            events_log.append(d)
+            q.put(d)
 
         try:
             state, decisions = run_call(dict(script, call_id=run_id), _make_agent(), sink, AS_OF, pace=True)
             rec = build_enrichment(state, decisions)
-            store.insert_call(rec)
-            q.put({"event_type": "postcall.enrichment_completed", "call_id": run_id,
-                   "payload": {"summary": rec.summary, "outcome": rec.outcome, "product_id": rec.product_id}})
+            store.insert_call(rec, scenario_id=script_id)
+            postcall_evt = {"event_type": "postcall.enrichment_completed", "call_id": run_id,
+                             "payload": {"summary": rec.summary, "outcome": rec.outcome, "product_id": rec.product_id}}
+            events_log.append(postcall_evt)
+            q.put(postcall_evt)
+            store.save_events(run_id, events_log)
         finally:
             q.put(None)
 
@@ -129,6 +136,22 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/calls/([^/]+)/stream", path)
         if m:
             return self._stream(m.group(1))
+        if path == "/api/supervisor/summary":
+            counts = store.outcome_counts()
+            return self._json(200, {
+                "total_calls": sum(counts.values()),
+                "outcome_counts": counts,
+                "avg_final_sentiment": store.avg_final_sentiment(),
+                "generated_by_counts": store.generated_by_counts(),
+            })
+        if path == "/api/supervisor/calls":
+            return self._json(200, store.recent_calls(50))
+        m = re.fullmatch(r"/api/supervisor/calls/([^/]+)/events", path)
+        if m:
+            events = store.get_events(m.group(1))
+            if events is None:
+                return self._json(404, {"error": "no stored trace for this call_id"})
+            return self._json(200, events)
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802

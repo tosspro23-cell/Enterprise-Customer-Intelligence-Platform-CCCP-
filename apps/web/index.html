@@ -11,7 +11,14 @@
   <h1>CCCP Workbench</h1>
   <span class="badge" id="mode-badge">checking mode&hellip;</span>
   <span class="badge">synthetic call data</span>
+  <nav class="view-switch">
+    <button class="view-tab active" id="tab-agent" data-view="agent">Agent view</button>
+    <button class="view-tab" id="tab-supervisor" data-view="supervisor">Supervisor view</button>
+  </nav>
 </header>
+
+<!-- ============================== AGENT VIEW: what an agent sees live during one call ============================== -->
+<div id="view-agent">
 
 <div class="scenario-wrap">
   <h2 class="scenario-heading">Scenarios <span class="hint">11 synthetic customers, each exercising one rule or capability -- pick one to run</span></h2>
@@ -53,6 +60,27 @@
   </details>
 </div>
 
+</div>
+
+<!-- ============================== SUPERVISOR VIEW: aggregate stats + drill into any past call ============================== -->
+<div id="view-supervisor" style="display:none">
+
+<div class="sv-summary-row" id="sv-summary">
+  <span class="empty">Loading summary&hellip;</span>
+</div>
+
+<div class="split">
+  <section class="panel">
+    <h2>Recent calls <span class="hint">click a row to replay its full trace below</span></h2>
+    <div id="sv-calls"><span class="empty">No calls recorded yet.</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>Call detail <span class="hint" id="sv-detail-hint">pick a call on the left</span></h2>
+    <div id="sv-detail"><span class="empty">Nothing selected.</span></div>
+  </section>
+</div>
+
 <div class="assistant">
   <h2 style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px">
     Supervisor assistant (demo router)
@@ -63,6 +91,8 @@
     <button class="primary" type="submit">Ask</button>
   </form>
   <div class="answer" id="answer"><span class="empty">No question asked yet.</span></div>
+</div>
+
 </div>
 
 <script src="/app.js"></script>

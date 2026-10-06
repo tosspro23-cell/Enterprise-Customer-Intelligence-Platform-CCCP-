@@ -26,7 +26,12 @@ CREATE TABLE IF NOT EXISTS call_enrichment_fact (
     generated_by TEXT,
     degraded TEXT NOT NULL,
     trace_id TEXT NOT NULL,
-    summary TEXT NOT NULL
+    summary TEXT NOT NULL,
+    scenario_id TEXT
+);
+CREATE TABLE IF NOT EXISTS call_events (
+    call_id TEXT PRIMARY KEY,
+    events_json TEXT NOT NULL
 );
 """
 
@@ -37,21 +42,36 @@ class AnalyticalStore:
         self._lock = threading.Lock()
         with self._conn() as c:
             c.executescript(SCHEMA)
+            # Migration for stores created before scenario_id existed (CREATE TABLE
+            # IF NOT EXISTS doesn't retrofit new columns onto an existing file).
+            cols = {row[1] for row in c.execute("PRAGMA table_info(call_enrichment_fact)")}
+            if "scenario_id" not in cols:
+                c.execute("ALTER TABLE call_enrichment_fact ADD COLUMN scenario_id TEXT")
 
     def _conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self._path, check_same_thread=False)
 
-    def insert_call(self, rec: EnrichmentRecord) -> None:
+    def insert_call(self, rec: EnrichmentRecord, scenario_id: str | None = None) -> None:
         with self._lock, self._conn() as c:
             c.execute(
                 "INSERT OR REPLACE INTO call_enrichment_fact "
                 "(call_id, customer_id, agent_id, ended_at, final_sentiment, sentiment_trajectory, "
-                " themes, outcome, product_id, generated_by, degraded, trace_id, summary) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " themes, outcome, product_id, generated_by, degraded, trace_id, summary, scenario_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rec.call_id, rec.customer_id, rec.agent_id, rec.ended_at, rec.final_sentiment,
                  json.dumps(rec.sentiment_trajectory), json.dumps(rec.themes), rec.outcome, rec.product_id,
-                 rec.generated_by, json.dumps(rec.degraded), rec.trace_id, rec.summary),
+                 rec.generated_by, json.dumps(rec.degraded), rec.trace_id, rec.summary, scenario_id),
             )
+
+    def save_events(self, call_id: str, events: list[dict]) -> None:
+        with self._lock, self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO call_events (call_id, events_json) VALUES (?, ?)",
+                      (call_id, json.dumps(events)))
+
+    def get_events(self, call_id: str) -> list[dict] | None:
+        with self._conn() as c:
+            row = c.execute("SELECT events_json FROM call_events WHERE call_id=?", (call_id,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def outcome_counts(self) -> dict[str, int]:
         with self._conn() as c:
@@ -70,6 +90,15 @@ class AnalyticalStore:
             rows = c.execute("SELECT * FROM call_enrichment_fact ORDER BY ended_at DESC LIMIT ?",
                               (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    def generated_by_counts(self) -> dict[str, int]:
+        """How often a recommendation's explanation came from the real narrator
+        vs. the deterministic template fallback -- the narrator guardrail catch
+        rate, read back from what actually happened rather than from an eval run."""
+        with self._conn() as c:
+            rows = c.execute("SELECT generated_by, COUNT(*) FROM call_enrichment_fact "
+                              "WHERE generated_by IS NOT NULL GROUP BY generated_by").fetchall()
+        return {k: v for k, v in rows}
 
     def suggestion_acceptance_rate(self) -> float | None:
         """Placeholder metric: proportion of recommended calls (no feedback capture in this slice)."""

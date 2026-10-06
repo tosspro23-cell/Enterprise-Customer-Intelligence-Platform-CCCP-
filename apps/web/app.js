@@ -408,6 +408,155 @@ async function loadMode() {
   }
 }
 
+// -------------------------------------------------------------- view switch
+const viewAgentEl = document.getElementById("view-agent");
+const viewSupervisorEl = document.getElementById("view-supervisor");
+const tabAgentEl = document.getElementById("tab-agent");
+const tabSupervisorEl = document.getElementById("tab-supervisor");
+
+function switchView(view) {
+  const toSupervisor = view === "supervisor";
+  viewAgentEl.style.display = toSupervisor ? "none" : "";
+  viewSupervisorEl.style.display = toSupervisor ? "" : "none";
+  tabAgentEl.classList.toggle("active", !toSupervisor);
+  tabSupervisorEl.classList.toggle("active", toSupervisor);
+  if (toSupervisor) loadSupervisor();
+}
+tabAgentEl.addEventListener("click", () => switchView("agent"));
+tabSupervisorEl.addEventListener("click", () => switchView("supervisor"));
+
+// -------------------------------------------------------------- supervisor view
+const svSummaryEl = document.getElementById("sv-summary");
+const svCallsEl = document.getElementById("sv-calls");
+const svDetailEl = document.getElementById("sv-detail");
+const svDetailHintEl = document.getElementById("sv-detail-hint");
+
+const OUTCOME_COLOR = {
+  recommended: "var(--ok)", deferred: "var(--warn)", suppressed: "var(--bad)",
+  specialist_handoff: "var(--handoff)", no_recommendation: "var(--muted)",
+  unavailable: "var(--muted)", no_decision: "var(--muted)",
+};
+
+async function loadSupervisor() {
+  const [summary, calls] = await Promise.all([
+    fetch("/api/supervisor/summary").then((r) => r.json()),
+    fetch("/api/supervisor/calls").then((r) => r.json()),
+  ]);
+  renderSvSummary(summary);
+  renderSvCalls(calls);
+}
+
+function renderSvSummary(s) {
+  svSummaryEl.innerHTML = "";
+  const stat = (label, value, sub) => {
+    const el = document.createElement("div");
+    el.className = "sv-stat";
+    el.innerHTML = `<div class="sv-stat-label">${label}</div><div class="sv-stat-value">${value}</div>${sub ? `<div class="sv-stat-sub">${sub}</div>` : ""}`;
+    return el;
+  };
+  svSummaryEl.appendChild(stat("Total calls", s.total_calls ?? 0));
+  const avg = s.avg_final_sentiment;
+  svSummaryEl.appendChild(stat("Avg. final sentiment", avg == null ? "–" : (avg >= 0 ? "+" : "") + avg.toFixed(2)));
+  const gen = s.generated_by_counts || {};
+  const genTotal = (gen.llm || 0) + (gen.template || 0);
+  const catchRate = genTotal ? Math.round(((gen.template || 0) / genTotal) * 100) : null;
+  svSummaryEl.appendChild(stat("Narrator used real LLM", genTotal ? `${gen.llm || 0}/${genTotal}` : "–",
+    catchRate !== null ? `${catchRate}% fell back to template` : ""));
+  const outcomeEl = stat("Outcome mix", Object.values(s.outcome_counts || {}).reduce((a, b) => a + b, 0) || 0);
+  const bar = document.createElement("div");
+  bar.className = "sv-outcome-bar";
+  const total = Object.values(s.outcome_counts || {}).reduce((a, b) => a + b, 0) || 1;
+  for (const [outcome, n] of Object.entries(s.outcome_counts || {})) {
+    const seg = document.createElement("span");
+    seg.style.width = `${(n / total) * 100}%`;
+    seg.style.background = OUTCOME_COLOR[outcome] || "var(--muted)";
+    seg.title = `${outcome}: ${n}`;
+    bar.appendChild(seg);
+  }
+  outcomeEl.appendChild(bar);
+  svSummaryEl.appendChild(outcomeEl);
+}
+
+function renderSvCalls(calls) {
+  clearChildren(svCallsEl);
+  if (!calls.length) return svCallsEl.appendChild(emptySpan("No calls recorded yet -- run a scenario in Agent view first."));
+  for (const c of calls) {
+    const row = document.createElement("div");
+    row.className = "sv-call-row";
+    const outcomeBadge = `<span class="sv-call-outcome" style="background:${OUTCOME_COLOR[c.outcome] || "var(--muted)"}">${c.outcome.replace(/_/g, " ")}</span>`;
+    row.innerHTML = `
+      ${outcomeBadge}
+      <span class="sv-call-meta">${c.scenario_id || c.call_id} · ${c.customer_id}${c.product_id ? " → " + c.product_id : ""}</span>
+      <span class="sv-call-time">${(c.ended_at || "").replace("T", " ").slice(0, 19)}</span>`;
+    row.addEventListener("click", () => {
+      svCallsEl.querySelectorAll(".sv-call-row.selected").forEach((r) => r.classList.remove("selected"));
+      row.classList.add("selected");
+      loadSvDetail(c.call_id);
+    });
+    svCallsEl.appendChild(row);
+  }
+}
+
+async function loadSvDetail(callId) {
+  svDetailHintEl.textContent = callId;
+  svDetailEl.innerHTML = '<span class="empty">Loading&hellip;</span>';
+  const resp = await fetch(`/api/supervisor/calls/${callId}/events`);
+  if (!resp.ok) {
+    svDetailEl.innerHTML = '<span class="empty">No stored trace for this call.</span>';
+    return;
+  }
+  const events = await resp.json();
+  renderReplay(events);
+}
+
+function renderReplay(events) {
+  svDetailEl.innerHTML = "";
+  const transcript = document.createElement("div");
+  transcript.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:12px;";
+  const stageList = document.createElement("div");
+  stageList.style.cssText = "display:flex;flex-direction:column;gap:4px;";
+  let decisionHtml = "";
+
+  for (const evt of events) {
+    const p = evt.payload || {};
+    if (evt.event_type === "transcript.utterance_final") {
+      const b = document.createElement("div");
+      b.className = `bubble ${p.channel}`;
+      b.style.maxWidth = "100%";
+      b.innerHTML = `<span class="ch">${p.channel}</span>${p.text}`;
+      transcript.appendChild(b);
+    } else if (evt.event_type === "commercial.decision_made") {
+      decisionHtml = `<div class="status-banner status-${p.outcome}" style="margin:10px 0 4px">${p.outcome.replace(/_/g, " ").toUpperCase()}</div>
+        <div class="citelist">policy: ${(p.policy_decisions || []).join(", ") || "(none fired)"}</div>`;
+    } else if (evt.event_type === "copilot.suggestion_generated") {
+      decisionHtml += `<div class="suggestion-text">${p.explanation}</div><div class="citelist">cites: ${(p.cited_document_ids || []).join(", ") || "none"}</div>`;
+    } else if (evt.event_type === "pipeline.stage" && p.status === "done") {
+      const meta = STAGE_CATALOG[p.stage] || { code: p.stage.toUpperCase(), source: "local" };
+      const row = document.createElement("div");
+      row.style.cssText = "font-size:11.5px;display:flex;gap:8px;align-items:center;";
+      row.innerHTML = `<span class="trace-code" style="background:${meta.source === "cloud" ? "var(--cloud)" : "var(--local)"}">${meta.code}</span>
+        <span style="color:var(--muted)">${(p.ms ?? 0).toFixed(0)} ms</span>`;
+      stageList.appendChild(row);
+    }
+  }
+  if (transcript.children.length) svDetailEl.appendChild(transcript);
+  if (decisionHtml) {
+    const d = document.createElement("div");
+    d.innerHTML = decisionHtml;
+    svDetailEl.appendChild(d);
+  }
+  if (stageList.children.length) {
+    const details = document.createElement("details");
+    details.open = false;
+    const summary = document.createElement("summary");
+    summary.textContent = `pipeline stages (${stageList.children.length})`;
+    details.appendChild(summary);
+    details.appendChild(stageList);
+    svDetailEl.appendChild(details);
+  }
+  if (!svDetailEl.children.length) svDetailEl.appendChild(emptySpan("Nothing to show for this call."));
+}
+
 resetPanels();
 loadMode();
 loadScripts();

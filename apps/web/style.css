@@ -52,6 +52,17 @@ header {
   flex-wrap: wrap;
 }
 header h1 { font-size: 16px; margin: 0; }
+.view-switch { margin-left: auto; display: flex; gap: 4px; }
+.view-tab {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.view-tab.active { background: var(--chip); color: var(--text); border-color: var(--border); font-weight: 600; }
 .badge {
   font-size: 11px;
   padding: 2px 8px;
@@ -203,6 +214,34 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
   overflow-y: auto;
 }
 #log div { white-space: pre-wrap; opacity: 0.9; }
+
+/* ---------------------------------------------------------- supervisor view */
+.sv-summary-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; padding: 16px 20px 0; }
+.sv-stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.sv-stat .sv-stat-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 4px; }
+.sv-stat .sv-stat-value { font-size: 22px; font-weight: 600; }
+.sv-stat .sv-stat-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sv-outcome-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.sv-outcome-bar span { height: 100%; }
+
+#sv-calls { max-height: 420px; overflow-y: auto; }
+.sv-call-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.sv-call-row:hover { background: var(--chip); }
+.sv-call-row.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sv-call-row .sv-call-outcome { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; color: #fff; white-space: nowrap; }
+.sv-call-row .sv-call-meta { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+.sv-call-row .sv-call-time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+#sv-detail { max-height: 480px; overflow-y: auto; }
 
 .assistant {
   margin: 20px 20px 24px;
