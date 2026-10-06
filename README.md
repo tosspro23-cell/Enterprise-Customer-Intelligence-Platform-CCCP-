@@ -261,6 +261,7 @@ apps/api/cloud_server.py  thin HTTP wrapper to trigger/fetch the load test from 
 apps/web/            the Workbench page (vanilla HTML/CSS/JS)
 tools/loadtest.py    concurrent load test against the real Azure backends
 Dockerfile, .github/workflows/build-push-ghcr.yml   builds the load-test image, pushes to ghcr.io
+infra/main.bicep     every Azure resource above, as code (see infra/README.md)
 docs/            platform architecture (functional, technology, real-time, governance)
 data/synthetic/  customers, interactions, model scores, catalog, guidance
 data/calls/      the two scripted calls the Workbench runs
