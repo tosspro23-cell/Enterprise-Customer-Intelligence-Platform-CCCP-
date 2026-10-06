@@ -17,32 +17,38 @@
   <span class="empty">Loading scripts&hellip;</span>
 </div>
 
-<div class="grid">
+<!-- Business-facing summary: what happened and why, in plain language -->
+<section class="panel decision-summary" id="decision-summary">
+  <h2>Outcome</h2>
+  <div id="status-area"><span class="empty">Run a call to see the commercial decision here.</span></div>
+  <div id="suggestion-area"></div>
+</section>
+
+<div class="split">
+  <!-- Call transcript, with the real recognized text when voice/STT is in the loop -->
   <section class="panel">
     <h2>Call transcript</h2>
     <div id="transcript"><span class="empty">Run a call to see it here.</span></div>
+    <div class="sub-panel">
+      <div class="sentiment-value" id="sentiment-value">&ndash;</div>
+      <div class="sentiment-bar"><div id="sentiment-fill" style="width:50%;background:var(--muted)"></div></div>
+      <div class="chips" id="themes"><span class="empty">No themes yet.</span></div>
+    </div>
   </section>
 
+  <!-- Engineering-facing pipeline trace: every stage this call actually went through -->
   <section class="panel">
-    <h2>Live signals</h2>
-    <div class="sentiment-value" id="sentiment-value">&ndash;</div>
-    <div class="sentiment-bar"><div id="sentiment-fill" style="width:50%;background:var(--muted)"></div></div>
-    <div class="chips" id="themes"><span class="empty">No themes yet.</span></div>
-  </section>
-
-  <section class="panel">
-    <h2>Commercial decision</h2>
-    <div id="status-area"><span class="empty">No decision yet.</span></div>
-    <div id="suggestion-area"></div>
+    <h2>Pipeline trace <span class="hint">what ran, which system, how long, why it's there</span></h2>
+    <div id="trace"><span class="empty">Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on.</span></div>
   </section>
 </div>
 
-<div class="panel" id="latency-panel" style="margin:0 20px 16px;display:none">
-  <h2>Real cloud call latency (this call, live)</h2>
-  <div id="latency-rows"><span class="empty">No cloud calls yet.</span></div>
+<div id="log-wrap">
+  <details>
+    <summary>Raw event log (NDJSON wire format)</summary>
+    <div id="log"><div class="empty" style="color:#8a8f98">Event log will appear here once a call runs.</div></div>
+  </details>
 </div>
-
-<div id="log"><div class="empty" style="color:#8a8f98">Event log will appear here once a call runs.</div></div>
 
 <div class="assistant">
   <h2 style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px">

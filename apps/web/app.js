@@ -5,14 +5,50 @@ const sentimentFillEl = document.getElementById("sentiment-fill");
 const themesEl = document.getElementById("themes");
 const statusAreaEl = document.getElementById("status-area");
 const suggestionAreaEl = document.getElementById("suggestion-area");
+const traceEl = document.getElementById("trace");
 const logEl = document.getElementById("log");
 const answerEl = document.getElementById("answer");
 const quickEl = document.getElementById("quick");
 const modeBadgeEl = document.getElementById("mode-badge");
-const latencyPanelEl = document.getElementById("latency-panel");
-const latencyRowsEl = document.getElementById("latency-rows");
+
+// What each pipeline stage is, which system backs it, and -- just as
+// important -- whether that system call is real (hits Azure) or a local
+// stand-in (synthetic data, no network call). Mirrors docs/architecture.md
+// and README.md; the point of writing it here too is that someone watching
+// a call run shouldn't have to go read those to understand what they're
+// looking at.
+const STAGE_CATALOG = {
+  stt: { code: "STT", label: "Speech-to-Text", system: "Azure AI Speech", source: "cloud",
+    business: "Turns the customer's spoken words into text the system can act on.",
+    technical: "Real-time streaming STT (PushAudioInputStream). Audio is synthesised by Azure TTS for this demo -- there is no live phone call behind it." },
+  sentiment: { code: "SENT", label: "Sentiment Scoring", system: "Azure AI Language", source: "cloud",
+    business: "Scores how positive or negative the customer sounds, right now.",
+    technical: "analyze_sentiment API; positive_confidence minus negative_confidence, mapped to [-1, 1]." },
+  theme: { code: "THEME", label: "Theme Tagging", system: "keyword match", source: "local",
+    business: "Flags which topic the customer is discussing (fees, savings, etc.).",
+    technical: "Keyword match against the controlled taxonomy. NOT a trained classifier in this build -- production would use one (docs/architecture.md §9.9)." },
+  redis: { code: "STATE", label: "Hot Call State", system: "Azure Managed Redis", source: "cloud",
+    business: "Remembers this call's mood and topics while it's still in progress.",
+    technical: "Redis HSET/RPUSH per utterance, 24h TTL, EnterpriseCluster policy." },
+  gate: { code: "GATE", label: "Policy Gate", system: "deterministic rules", source: "local",
+    business: "Checks hard business rules BEFORE any product is even considered -- e.g. never sell to a customer with an open complaint.",
+    technical: "commercial-policy-v1.0; customer gates R0-R3 run before scoring, most-restrictive-wins. Customer/interaction data is a local synthetic fixture, not a real warehouse." },
+  ml: { code: "ML", label: "Propensity Scoring", system: "existing ML model", source: "local",
+    business: "Asks the existing prediction model which product this customer is likely to want.",
+    technical: "PredictiveModelPort.score_products(); fixed feature schema, no live-call features injected. Synthetic fixture data in this build, not a real model endpoint." },
+  search: { code: "SEARCH", label: "Guidance Retrieval", system: "Azure AI Search", source: "cloud",
+    business: "Finds the company-approved script for recommending this product.",
+    technical: "Hybrid search filtered by product + situation + active version." },
+  narrator: { code: "LLM", label: "Narrator", system: "Azure OpenAI", source: "cloud",
+    business: "Turns the decision into a sentence the agent can actually say to the customer.",
+    technical: "LLM call; output validated against grounded context (citations, numbers, product match) before use; template fallback on any violation." },
+  evidence: { code: "EVID", label: "Evidence Assembly", system: "", source: "local",
+    business: "Collects the proof behind every claim -- which model, which rule, which guidance version -- so the recommendation can be audited.",
+    technical: "Evidence objects attached to the result; see the expandable list on the recommendation above." },
+};
 
 function clearChildren(el) { el.innerHTML = ""; }
+function emptySpan(text) { const s = document.createElement("span"); s.className = "empty"; s.textContent = text; return s; }
 
 function logLine(evt) {
   const div = document.createElement("div");
@@ -21,23 +57,25 @@ function logLine(evt) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+let traceRowsById = {};
+
 function resetPanels() {
   clearChildren(transcriptEl);
+  transcriptEl.appendChild(emptySpan("Run a call to see it here."));
   sentimentValueEl.textContent = "–";
   sentimentFillEl.style.width = "50%";
   sentimentFillEl.style.background = "var(--muted)";
   clearChildren(themesEl);
-  const empty = document.createElement("span");
-  empty.className = "empty";
-  empty.textContent = "No themes yet.";
-  themesEl.appendChild(empty);
-  statusAreaEl.innerHTML = '<span class="empty">No decision yet.</span>';
+  themesEl.appendChild(emptySpan("No themes yet."));
+  statusAreaEl.innerHTML = "";
+  statusAreaEl.appendChild(emptySpan("No decision yet."));
   suggestionAreaEl.innerHTML = "";
   logEl.innerHTML = "";
-  latencyRowsEl.innerHTML = '<span class="empty">No cloud calls yet.</span>';
+  clearChildren(traceEl);
+  traceRowsById = {};
 }
 
-function appendBubble(channel, text) {
+function appendBubble(channel, text, sttDetail) {
   if (transcriptEl.querySelector(".empty")) clearChildren(transcriptEl);
   const b = document.createElement("div");
   b.className = `bubble ${channel}`;
@@ -46,6 +84,12 @@ function appendBubble(channel, text) {
   ch.textContent = channel;
   b.appendChild(ch);
   b.appendChild(document.createTextNode(text));
+  if (sttDetail && sttDetail.recognized_text && sttDetail.recognized_text !== text) {
+    const diff = document.createElement("span");
+    diff.className = "stt-diff";
+    diff.textContent = `Azure STT heard: "${sttDetail.recognized_text}"`;
+    b.appendChild(diff);
+  }
   transcriptEl.appendChild(b);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
 }
@@ -59,13 +103,7 @@ function updateSentiment(rolling) {
 
 function updateThemes(active) {
   clearChildren(themesEl);
-  if (!active.length) {
-    const empty = document.createElement("span");
-    empty.className = "empty";
-    empty.textContent = "No themes yet.";
-    themesEl.appendChild(empty);
-    return;
-  }
+  if (!active.length) return themesEl.appendChild(emptySpan("No themes yet."));
   for (const t of active) {
     const chip = document.createElement("span");
     chip.className = "chip";
@@ -123,37 +161,61 @@ function showSuggestion(payload) {
   suggestionAreaEl.appendChild(details);
 }
 
-const LATENCY_SCALE_MS = 12000;   // bar width reference -- narrator calls run several seconds
-
-function upsertLatencyRow(label, ms, detail) {
-  if (latencyRowsEl.querySelector(".empty")) clearChildren(latencyRowsEl);
-  let row = latencyRowsEl.querySelector(`[data-stage="${label}"]`);
-  if (!row) {
-    row = document.createElement("div");
-    row.className = "latency-row";
-    row.dataset.stage = label;
-    row.innerHTML = `<div><div>${label}</div><div class="latency-bar-track"><div class="latency-bar-fill" style="width:0%"></div></div></div><div class="latency-ms"></div>`;
-    latencyRowsEl.appendChild(row);
-  }
-  const pct = Math.min(100, Math.round((ms / LATENCY_SCALE_MS) * 100));
-  row.querySelector(".latency-bar-fill").style.width = pct + "%";
-  row.querySelector(".latency-ms").textContent = detail || `${ms.toFixed(0)} ms`;
-}
-
-function showSpanLatencies(spans) {
-  if (!spans || !spans.length) return;
-  latencyPanelEl.style.display = "block";
-  for (const s of spans) {
-    if (s.duration_ms > 1) upsertLatencyRow(s.name, s.duration_ms);
-  }
-}
-
 function showPostcall(payload) {
   const banner = document.createElement("div");
   banner.className = "citelist";
   banner.style.marginTop = "10px";
   banner.textContent = `post-call record saved — ${payload.summary}`;
   statusAreaEl.appendChild(banner);
+}
+
+const TRACE_SCALE_MS = 10000; // bar width reference -- the narrator stage runs several seconds
+
+function handleStage(p) {
+  const meta = STAGE_CATALOG[p.stage] || { code: p.stage.slice(0, 5).toUpperCase(), label: p.stage, system: "", source: "local", business: "", technical: "" };
+  let entry = traceRowsById[p.instance_id];
+  if (!entry) {
+    if (traceEl.querySelector(".empty")) clearChildren(traceEl);
+    const row = document.createElement("div");
+    row.className = `trace-row source-${meta.source}`;
+    row.innerHTML = `
+      <div class="trace-row-main">
+        <span class="trace-code">${meta.code}</span>
+        <div class="trace-row-text">
+          <div class="trace-label">${meta.label}<span class="trace-system">${meta.system}</span></div>
+          <div class="trace-business">${meta.business}</div>
+        </div>
+        <span class="trace-status trace-status-running">running</span>
+        <span class="trace-ms"></span>
+      </div>
+      <div class="trace-bar-track"><div class="trace-bar-fill" style="width:0%"></div></div>
+      <details>
+        <summary>technical detail</summary>
+        <div class="trace-technical">${meta.technical}</div>
+        <div class="trace-eh-note"></div>
+        <pre class="trace-raw" style="display:none"></pre>
+      </details>`;
+    traceEl.appendChild(row);
+    entry = { el: row };
+    traceRowsById[p.instance_id] = entry;
+  }
+  const row = entry.el;
+  if (p.status === "done") {
+    row.querySelector(".trace-status").className = "trace-status trace-status-done";
+    row.querySelector(".trace-status").textContent = "done";
+    const ms = typeof p.ms === "number" ? p.ms : 0;
+    row.querySelector(".trace-ms").textContent = `${ms.toFixed(0)} ms`;
+    row.querySelector(".trace-bar-fill").style.width = Math.min(100, Math.round((ms / TRACE_SCALE_MS) * 100)) + "%";
+    if (p.detail && Object.keys(p.detail).length) {
+      const raw = row.querySelector(".trace-raw");
+      raw.style.display = "block";
+      raw.textContent = JSON.stringify(p.detail, null, 2);
+    }
+  }
+  if (typeof p._eh_publish_ms === "number") {
+    row.querySelector(".trace-eh-note").textContent = `+ published to Event Hubs in ${p._eh_publish_ms.toFixed(0)} ms`;
+  }
+  traceEl.scrollTop = traceEl.scrollHeight;
 }
 
 async function runScript(scriptId, buttons) {
@@ -187,17 +249,13 @@ async function runScript(scriptId, buttons) {
 
 function dispatch(evt) {
   const p = evt.payload || {};
-  if (typeof p._eh_publish_ms === "number") {
-    latencyPanelEl.style.display = "block";
-    upsertLatencyRow("Event Hub publish", p._eh_publish_ms);
-  }
-  if (typeof p._redis_ms === "number") {
-    latencyPanelEl.style.display = "block";
-    upsertLatencyRow("Redis round trip", p._redis_ms);
+  if (evt.event_type === "pipeline.stage") {
+    handleStage(p);
+    return;
   }
   switch (evt.event_type) {
     case "transcript.utterance_final":
-      appendBubble(p.channel, p.text);
+      appendBubble(p.channel, p.text, p._stt);
       break;
     case "sentiment.updated":
       updateSentiment(p.rolling_sentiment);
@@ -207,7 +265,6 @@ function dispatch(evt) {
       break;
     case "commercial.decision_made":
       updateDecision(p);
-      showSpanLatencies(p.spans);
       break;
     case "copilot.suggestion_generated":
       showSuggestion(p);
@@ -285,10 +342,9 @@ async function loadMode() {
     const resp = await fetch("/api/mode");
     const data = await resp.json();
     if (data.mode === "azure-live") {
-      modeBadgeEl.textContent = "LIVE AZURE -- real Event Hubs/Redis/AI Search/OpenAI";
+      modeBadgeEl.textContent = "LIVE AZURE -- real Speech/Language/Event Hubs/Redis/AI Search/OpenAI";
       modeBadgeEl.style.background = "color-mix(in srgb, var(--ok) 20%, transparent)";
       modeBadgeEl.style.color = "var(--ok)";
-      latencyPanelEl.style.display = "block";
     } else {
       modeBadgeEl.textContent = "local demo (no cloud calls)";
     }
@@ -297,6 +353,7 @@ async function loadMode() {
   }
 }
 
+resetPanels();
 loadMode();
 loadScripts();
 setupAssistant();

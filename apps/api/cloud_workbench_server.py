@@ -1,16 +1,29 @@
-"""The Workbench, pointed at the real Azure backends instead of local
-stand-ins. Same frontend (apps/web/) and same NDJSON streaming protocol as
-apps/api/server.py, so a browser can't tell which one it's talking to
-except for the "LIVE AZURE" badge (GET /api/mode) -- the difference is
-entirely in what each event is sourced from: real Event Hubs publishes,
-real Redis round trips, a real AI Search query, a real Azure OpenAI call.
+"""The Workbench, pointed at the real Azure backends and running the full
+voice pipeline -- not just text. Same frontend (apps/web/) and NDJSON
+streaming protocol as apps/api/server.py; the difference is entirely in
+what each event is sourced from:
 
-Run: set AZURE_OPENAI_*, EVENTHUB_*, AZURE_SEARCH_*, REDIS_* (see
-.env.azure, not committed), then `python apps/api/cloud_workbench_server.py`.
-Deployed to Azure Container Apps as a second entry point into the same
-image server.py/cloud_server.py already ship in (see Dockerfile) -- this
-file is selected by overriding the container's start command, not by a
-separate image.
+  customer utterance text -> Azure TTS (synthesise) -> Azure STT (transcribe)
+  recognised text         -> Azure AI Language (real sentiment)
+  recognised text         -> keyword taxonomy match (theme; not a trained classifier)
+  every step              -> a real Redis round trip (hot state) and a real
+                              Event Hubs publish (domain event)
+  trigger fires            -> the real CommercialDecisionAgent: policy gate,
+                              propensity model (synthetic), Azure AI Search
+                              (guidance), Azure OpenAI (narrator)
+
+Every one of those steps is emitted to the browser as a `pipeline.stage`
+event (running, then done with real latency) in addition to the normal
+domain events, so the Workbench can render a full, honest trace of what
+actually ran -- see apps/web/app.js's STAGE_CATALOG for how each stage is
+presented and which ones are real cloud calls vs. local stand-ins.
+
+Run: set AZURE_OPENAI_*, EVENTHUB_*, AZURE_SEARCH_*, REDIS_*,
+AZURE_SPEECH_*, AZURE_LANGUAGE_* (see .env.azure, not committed), then
+`python apps/api/cloud_workbench_server.py`. Deployed to Azure Container
+Apps as a second entry point into the image server.py/cloud_server.py
+already ship in (see Dockerfile) -- selected by overriding the container's
+start command, not a separate image.
 """
 from __future__ import annotations
 
@@ -19,6 +32,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import uuid
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -35,6 +49,8 @@ from cccp_platform import assistant as assistant_mod  # noqa: E402
 from cccp_platform.azure_backends.event_hub_bus import EventHubSink  # noqa: E402
 from cccp_platform.azure_backends.redis_state import RedisCallState  # noqa: E402
 from cccp_platform.azure_backends.search_guidance import AzureSearchGuidanceIndex  # noqa: E402
+from cccp_platform.azure_backends.sentiment_language import analyse_sentiment, tag_themes  # noqa: E402
+from cccp_platform.azure_backends.speech import roundtrip as speech_roundtrip  # noqa: E402
 from cccp_platform.events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, EventSequencer, SENTIMENT_UPDATED,
                                    SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
 from cccp_platform.postcall import build_enrichment
@@ -47,6 +63,15 @@ DB_DIR.mkdir(exist_ok=True)
 AS_OF = date(2026, 10, 5)
 PORT = 8080
 
+# Decision-time spans (from CommercialDecisionAgent's own tracing) rolled up
+# into the same stage vocabulary the browser already knows about. The four
+# local/instant ones (get_customer, get_interactions, analyse,
+# customer_gates) are all synthetic-data/local-compute -- summed into one
+# "gate" row rather than four near-zero-ms rows nobody needs to see
+# separately.
+_GATE_SPANS = {"get_customer", "get_interactions", "analyse", "customer_gates"}
+_SPAN_TO_STAGE = {"score_products": "ml", "search_guidance": "search", "narrator_explain": "narrator"}
+
 estate = SyntheticEstate()
 store = AnalyticalStore(DB_DIR / "workbench_cloud.db")
 SCRIPTS = {f.stem: json.loads(f.read_text()) for f in sorted(CALLS_DIR.glob("*.json"))}
@@ -54,27 +79,39 @@ call_queues: dict[str, "queue.Queue"] = {}
 
 
 def start_call(script_id: str) -> str:
-    """Runs one scripted call against the real backends, forwarding each
-    event to the browser's queue annotated with the real latency it took
-    (not just the production event payload) -- the point of this server.
-    """
     script = SCRIPTS[script_id]
     run_id = f"{script['call_id']}_{uuid.uuid4().hex[:6]}"
     q: queue.Queue = queue.Queue()
     call_queues[run_id] = q
+
+    def browser_put(event_type: str, payload: dict) -> None:
+        q.put({"event_type": event_type, "call_id": run_id, "payload": payload})
+
+    def stage_start(stage: str) -> str:
+        instance_id = uuid.uuid4().hex[:8]
+        browser_put("pipeline.stage", {"stage": stage, "status": "running", "instance_id": instance_id})
+        return instance_id
 
     def worker() -> None:
         try:
             eh_sink = EventHubSink()
 
             def dual_sink(evt) -> None:
-                eh_sink(evt)  # real publish to Event Hubs -- measures its own latency internally
+                eh_sink(evt)
                 d = evt.to_dict()
                 d["payload"]["_eh_publish_ms"] = round(eh_sink.publish_latencies_s[-1] * 1000, 1)
                 q.put(d)
 
+            def stage_done(stage: str, instance_id: str, ms: float, detail: dict | None = None) -> None:
+                # A real fact about this call -> goes through the real Event Hubs
+                # publish too, not just the browser (same as every other event).
+                payload = {"stage": stage, "status": "done", "instance_id": instance_id, "ms": round(ms, 1)}
+                if detail:
+                    payload["detail"] = detail
+                seq.emit("pipeline.stage", payload)
+
             trace_id = uuid.uuid4().hex[:16]
-            seq = EventSequencer(run_id, script["customer_id"], trace_id, "cloud-workbench", dual_sink)
+            seq = EventSequencer(run_id, script["customer_id"], trace_id, "cloud-workbench-voice", dual_sink)
             state = RedisCallState(run_id, script["customer_id"], script["agent_id"])
             agent = CommercialDecisionAgent(estate.customer_port(), estate.interaction_port(), estate.model_port(),
                                              AzureSearchGuidanceIndex(), estate.catalog, AzureOpenAINarrator(),
@@ -82,32 +119,72 @@ def start_call(script_id: str) -> str:
             decisions = []
 
             seq.emit(CALL_STARTED, {"customer_id": script["customer_id"], "agent_id": script["agent_id"]})
+
             for turn in script["utterances"]:
-                seq.emit(UTTERANCE_FINAL, {"channel": turn["channel"], "text": turn["text"]})
                 if turn["channel"] != "customer":
+                    seq.emit(UTTERANCE_FINAL, {"channel": turn["channel"], "text": turn["text"]})
                     continue
-                sentiment, themes = turn.get("sentiment"), turn.get("themes", [])
-                if sentiment is not None:
-                    rolling = state.update_sentiment(sentiment)
-                    seq.emit(SENTIMENT_UPDATED, {"utterance_sentiment": sentiment, "rolling_sentiment": round(rolling, 3),
-                                                  "_redis_ms": round(state.round_trip_latencies_s[-1] * 1000, 1)})
+
+                # --- real voice path: synthesise this line, transcribe it back ---
+                iid = stage_start("stt")
+                voice = speech_roundtrip(turn["text"])
+                stt_ms = (voice.synthesis_s + voice.recognition_s) * 1000
+                stage_done("stt", iid, stt_ms, {"original": turn["text"], "recognized": voice.recognized_text,
+                                                 "tts_s": voice.synthesis_s, "stt_s": voice.recognition_s})
+                recognized = voice.recognized_text or turn["text"]
+                seq.emit(UTTERANCE_FINAL, {"channel": "customer", "text": turn["text"],
+                                            "_stt": {"recognized_text": recognized}})
+
+                # --- real sentiment ---
+                iid = stage_start("sentiment")
+                t0 = time.perf_counter()
+                sentiment = analyse_sentiment(recognized)
+                stage_done("sentiment", iid, (time.perf_counter() - t0) * 1000, {"score": sentiment})
+
+                # --- theme tagging (local keyword match, not a cloud call) ---
+                iid = stage_start("theme")
+                t0 = time.perf_counter()
+                themes = tag_themes(recognized)
+                stage_done("theme", iid, (time.perf_counter() - t0) * 1000, {"themes": themes})
+
+                # --- hot state (real Redis) ---
+                iid = stage_start("redis")
+                rolling = state.update_sentiment(sentiment)
+                stage_done("redis", iid, state.round_trip_latencies_s[-1] * 1000, {"rolling_sentiment": round(rolling, 3)})
+                seq.emit(SENTIMENT_UPDATED, {"utterance_sentiment": sentiment, "rolling_sentiment": round(rolling, 3)})
+
                 if themes:
+                    iid = stage_start("redis")
                     active = state.update_themes(themes)
-                    seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active,
-                                               "_redis_ms": round(state.round_trip_latencies_s[-1] * 1000, 1)})
+                    stage_done("redis", iid, state.round_trip_latencies_s[-1] * 1000, {"active_themes": active})
+                    seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active})
+
                 if not turn.get("trigger"):
                     continue
 
+                # --- the real decision: policy gate -> ML score -> guidance -> narrator ---
                 live = LiveCallSignal(run_id, state.current_sentiment or 0.0, tuple(state.active_themes))
                 result = agent.run(DecisionRequest(script["customer_id"], AS_OF, call_id=run_id, live_signal=live))
                 decisions.append(result)
                 state.set_commercial_state(result.outcome.value)
+
+                gate_ms = sum(s["duration_ms"] for s in result.spans if s["name"] in _GATE_SPANS)
+                seq.emit("pipeline.stage", {"stage": "gate", "status": "done", "instance_id": uuid.uuid4().hex[:8],
+                                             "ms": round(gate_ms, 1),
+                                             "detail": {"policy_decisions": [d.rule_id for d in result.policy_decisions]}})
+                for s in result.spans:
+                    stage_key = _SPAN_TO_STAGE.get(s["name"])
+                    if stage_key:
+                        seq.emit("pipeline.stage", {"stage": stage_key, "status": "done",
+                                                     "instance_id": uuid.uuid4().hex[:8], "ms": s["duration_ms"]})
+                seq.emit("pipeline.stage", {"stage": "evidence", "status": "done", "instance_id": uuid.uuid4().hex[:8],
+                                             "ms": 0, "detail": {"evidence_count": len(result.evidence)}})
+
                 seq.emit(DECISION_MADE, {
                     "outcome": result.outcome.value,
                     "policy_decisions": [d.rule_id for d in result.policy_decisions],
                     "degraded": list(result.degraded),
                     "trace_id": result.trace_id,
-                    "spans": [{"name": s["name"], "duration_ms": s["duration_ms"]} for s in result.spans],
                 })
                 if result.outcome.value == "recommended":
                     seq.emit(SUGGESTION_GENERATED, {
@@ -117,6 +194,7 @@ def start_call(script_id: str) -> str:
                         "generated_by": result.explanation.generated_by,
                         "evidence": [e.__dict__ for e in result.evidence],
                     })
+
             state.end()
             seq.emit(CALL_ENDED, {})
             rec = build_enrichment(_StateAdapter(state, run_id, script), decisions)
@@ -145,7 +223,7 @@ class _StateAdapter:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CCCPCloudWorkbench/0.1"
+    server_version = "CCCPCloudWorkbench/0.2"
 
     def _json(self, status: int, obj) -> None:
         body = json.dumps(obj).encode()
@@ -234,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"CCCP Cloud Workbench (real Azure backends): :{PORT}")
+    print(f"CCCP Cloud Workbench (real Azure backends, voice path): :{PORT}")
     httpd.serve_forever()
 
 
