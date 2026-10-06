@@ -1,0 +1,18 @@
+[
+  {"document_id": "commercial-offers-savings", "version": "5", "section": "2.1", "effective_date": "2026-07-01",
+   "product_ids": ["savings_plus"], "situation": "post_resolution",
+   "text": "Only introduce Savings Plus after the customer has confirmed the complaint is resolved. Acknowledge the resolution first. Position Savings Plus as a way to earn interest on balances above 1000 EUR. Refer to the published rate sheet; never quote or promise a rate.",
+   "prohibited_phrases": ["guaranteed return", "best rate"], "source_url": "sharepoint://guidance/commercial-offers-savings"},
+  {"document_id": "commercial-offers-savings", "version": "5", "section": "2.2", "effective_date": "2026-07-01",
+   "product_ids": ["savings_plus"], "situation": "standard",
+   "text": "Savings Plus may be offered when the customer holds a current account and discusses saving or balances. Present it as optional. Refer to the published rate sheet; never quote or promise a rate.",
+   "prohibited_phrases": ["guaranteed return", "best rate"], "source_url": "sharepoint://guidance/commercial-offers-savings"},
+  {"document_id": "commercial-offers-cards", "version": "3", "section": "3.1", "effective_date": "2026-05-15",
+   "product_ids": ["premium_card"], "situation": "any",
+   "text": "Premium Card includes travel benefits and carries an annual fee that must always be disclosed before the customer agrees.",
+   "prohibited_phrases": ["no fee", "free card"], "source_url": "sharepoint://guidance/commercial-offers-cards"},
+  {"document_id": "commercial-offers-insurance", "version": "2", "section": "4.1", "effective_date": "2026-03-01",
+   "product_ids": ["travel_insurance"], "situation": "any",
+   "text": "Travel Insurance may be suggested when the customer mentions travel or card use abroad. Coverage terms must be sent in writing.",
+   "prohibited_phrases": ["covers everything"], "source_url": "sharepoint://guidance/commercial-offers-insurance"}
+]

@@ -1,0 +1,13 @@
+{
+  "cust_001": {"savings_plus": 0.82, "premium_card": 0.35, "travel_insurance": 0.41},
+  "cust_002": {"savings_plus": 0.77},
+  "cust_003": {"savings_plus": 0.70},
+  "cust_004": {"savings_plus": 0.91, "premium_card": 0.71, "travel_insurance": 0.40},
+  "cust_005": {"savings_plus": 0.80, "premium_card": 0.66, "travel_insurance": 0.52},
+  "cust_006": {"savings_plus": 0.85, "travel_insurance": 0.61, "premium_card": 0.30},
+  "cust_007": {"savings_plus": 0.31, "travel_insurance": 0.22},
+  "cust_008": {"savings_plus": 0.58},
+  "cust_009": {"premium_card": 0.80, "savings_plus": 0.60},
+  "cust_010": {"savings_plus": 0.74, "premium_card": 0.69},
+  "cust_011": {"wealth_advisory": 0.90, "savings_plus": 0.70, "crypto_wallet": 0.95}
+}

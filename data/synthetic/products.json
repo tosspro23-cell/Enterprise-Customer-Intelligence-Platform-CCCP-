@@ -1,0 +1,6 @@
+[
+  {"product_id": "savings_plus",     "name": "Savings Plus",     "regions": ["ES", "IT", "FR"],       "segments": ["mass", "high_value"], "min_propensity": 0.5, "priority": 1},
+  {"product_id": "premium_card",     "name": "Premium Card",     "regions": ["ES", "IT", "FR", "PT"], "segments": ["high_value"],         "min_propensity": 0.5, "priority": 2},
+  {"product_id": "travel_insurance", "name": "Travel Insurance", "regions": ["ES", "IT", "FR", "PT"], "segments": ["mass", "high_value"], "min_propensity": 0.5, "priority": 3},
+  {"product_id": "wealth_advisory",  "name": "Wealth Advisory",  "regions": ["ES"],                   "segments": ["high_value"],         "min_propensity": 0.6, "priority": 0}
+]

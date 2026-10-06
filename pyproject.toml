@@ -1,0 +1,16 @@
+[project]
+name = "cccp-agent"
+version = "0.1.0"
+description = "CCCP reference implementation - Commercial Decision Agent. Synthetic data only."
+requires-python = ">=3.11"
+dependencies = []            # core is stdlib-only by design
+
+[project.optional-dependencies]
+azure = ["openai>=1.40", "azure-identity>=1.17"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
