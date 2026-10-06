@@ -211,6 +211,14 @@ function handleStage(p) {
       raw.style.display = "block";
       raw.textContent = JSON.stringify(p.detail, null, 2);
     }
+  } else if (p.status === "error") {
+    row.querySelector(".trace-status").className = "trace-status trace-status-error";
+    row.querySelector(".trace-status").textContent = "failed";
+    if (p.detail && p.detail.error) {
+      const raw = row.querySelector(".trace-raw");
+      raw.style.display = "block";
+      raw.textContent = p.detail.error;
+    }
   }
   if (typeof p._eh_publish_ms === "number") {
     row.querySelector(".trace-eh-note").textContent = `+ published to Event Hubs in ${p._eh_publish_ms.toFixed(0)} ms`;
@@ -251,6 +259,29 @@ function dispatch(evt) {
   const p = evt.payload || {};
   if (evt.event_type === "pipeline.stage") {
     handleStage(p);
+    return;
+  }
+  if (evt.event_type === "pipeline.audio") {
+    const entry = traceRowsById[p.instance_id];
+    if (entry && p.audio_base64) {
+      const audio = document.createElement("audio");
+      audio.controls = true;
+      audio.style.cssText = "width:100%;height:28px;margin-top:6px;";
+      audio.src = `data:audio/wav;base64,${p.audio_base64}`;
+      entry.el.querySelector(".trace-row-main").insertAdjacentElement("afterend", audio);
+    }
+    return;
+  }
+  if (evt.event_type === "pipeline.error") {
+    statusAreaEl.innerHTML = "";
+    const banner = document.createElement("div");
+    banner.className = "status-banner status-unavailable";
+    banner.textContent = "PIPELINE ERROR";
+    statusAreaEl.appendChild(banner);
+    const detail = document.createElement("div");
+    detail.className = "citelist";
+    detail.textContent = p.error;
+    statusAreaEl.appendChild(detail);
     return;
   }
   switch (evt.event_type) {

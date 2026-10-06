@@ -193,6 +193,10 @@ var sharedSecrets = [
   { name: 'redis-host', value: redis.properties.hostName }
   { name: 'redis-port', value: '10000' }
   { name: 'redis-password', value: redisDatabase.listKeys().primaryKey }
+  { name: 'azure-speech-key', value: speech.listKeys().key1 }
+  { name: 'azure-speech-region', value: regionPrimary }
+  { name: 'azure-language-endpoint', value: language.properties.endpoint }
+  { name: 'azure-language-key', value: language.listKeys().key1 }
 ]
 var sharedEnvVars = [
   { name: 'AZURE_OPENAI_ENDPOINT', secretRef: 'azure-openai-endpoint' }
@@ -207,6 +211,12 @@ var sharedEnvVars = [
   { name: 'REDIS_HOST', secretRef: 'redis-host' }
   { name: 'REDIS_PORT', secretRef: 'redis-port' }
   { name: 'REDIS_PASSWORD', secretRef: 'redis-password' }
+  // Used by cccp-workbench-ui (the voice pipeline) and harmless-but-unused on
+  // cccp-workbench-app (the headless load-test runner never calls Speech/Language).
+  { name: 'AZURE_SPEECH_KEY', secretRef: 'azure-speech-key' }
+  { name: 'AZURE_SPEECH_REGION', secretRef: 'azure-speech-region' }
+  { name: 'AZURE_LANGUAGE_ENDPOINT', secretRef: 'azure-language-endpoint' }
+  { name: 'AZURE_LANGUAGE_KEY', secretRef: 'azure-language-key' }
 ]
 
 resource appHeadless 'Microsoft.App/containerApps@2024-03-01' = if (!empty(containerAppsEnvironmentId)) {

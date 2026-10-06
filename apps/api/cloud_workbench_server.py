@@ -27,6 +27,7 @@ start command, not a separate image.
 """
 from __future__ import annotations
 
+import base64
 import json
 import queue
 import re
@@ -50,7 +51,8 @@ from cccp_platform.azure_backends.event_hub_bus import EventHubSink  # noqa: E40
 from cccp_platform.azure_backends.redis_state import RedisCallState  # noqa: E402
 from cccp_platform.azure_backends.search_guidance import AzureSearchGuidanceIndex  # noqa: E402
 from cccp_platform.azure_backends.sentiment_language import analyse_sentiment, tag_themes  # noqa: E402
-from cccp_platform.azure_backends.speech import roundtrip as speech_roundtrip  # noqa: E402
+from cccp_platform.azure_backends.speech import synthesize as speech_synthesize  # noqa: E402
+from cccp_platform.azure_backends.speech import transcribe as speech_transcribe  # noqa: E402
 from cccp_platform.events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, EventSequencer, SENTIMENT_UPDATED,
                                    SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
 from cccp_platform.postcall import build_enrichment
@@ -87,8 +89,11 @@ def start_call(script_id: str) -> str:
     def browser_put(event_type: str, payload: dict) -> None:
         q.put({"event_type": event_type, "call_id": run_id, "payload": payload})
 
+    last_running_instance: list[str | None] = [None]
+
     def stage_start(stage: str) -> str:
         instance_id = uuid.uuid4().hex[:8]
+        last_running_instance[0] = instance_id
         browser_put("pipeline.stage", {"stage": stage, "status": "running", "instance_id": instance_id})
         return instance_id
 
@@ -105,6 +110,7 @@ def start_call(script_id: str) -> str:
             def stage_done(stage: str, instance_id: str, ms: float, detail: dict | None = None) -> None:
                 # A real fact about this call -> goes through the real Event Hubs
                 # publish too, not just the browser (same as every other event).
+                last_running_instance[0] = None
                 payload = {"stage": stage, "status": "done", "instance_id": instance_id, "ms": round(ms, 1)}
                 if detail:
                     payload["detail"] = detail
@@ -127,11 +133,20 @@ def start_call(script_id: str) -> str:
 
                 # --- real voice path: synthesise this line, transcribe it back ---
                 iid = stage_start("stt")
-                voice = speech_roundtrip(turn["text"])
-                stt_ms = (voice.synthesis_s + voice.recognition_s) * 1000
-                stage_done("stt", iid, stt_ms, {"original": turn["text"], "recognized": voice.recognized_text,
-                                                 "tts_s": voice.synthesis_s, "stt_s": voice.recognition_s})
-                recognized = voice.recognized_text or turn["text"]
+                t0 = time.perf_counter()
+                audio = speech_synthesize(turn["text"])
+                tts_s = time.perf_counter() - t0
+                t0 = time.perf_counter()
+                stt_result = speech_transcribe(audio)
+                stt_s = time.perf_counter() - t0
+                stage_done("stt", iid, (tts_s + stt_s) * 1000, {"original": turn["text"],
+                                                                 "recognized": stt_result.recognized_text,
+                                                                 "tts_s": round(tts_s, 2), "stt_s": round(stt_s, 2)})
+                # Audio is browser-only, never published to Event Hubs -- domain events
+                # carry facts about a call, never raw audio (docs/architecture.md §8.1).
+                browser_put("pipeline.audio", {"instance_id": iid,
+                                                "audio_base64": base64.b64encode(audio).decode("ascii")})
+                recognized = stt_result.recognized_text or turn["text"]
                 seq.emit(UTTERANCE_FINAL, {"channel": "customer", "text": turn["text"],
                                             "_stt": {"recognized_text": recognized}})
 
@@ -197,11 +212,17 @@ def start_call(script_id: str) -> str:
 
             state.end()
             seq.emit(CALL_ENDED, {})
-            rec = build_enrichment(_StateAdapter(state, run_id, script), decisions)
+            rec = build_enrichment(_StateAdapter(state, run_id, script, trace_id), decisions)
             store.insert_call(rec)
             q.put({"event_type": "postcall.enrichment_completed", "call_id": run_id,
                    "payload": {"summary": rec.summary, "outcome": rec.outcome, "product_id": rec.product_id}})
             eh_sink.close()
+        except Exception as e:  # noqa: BLE001 - a demo must show its own failures, never hang silently
+            if last_running_instance[0]:
+                browser_put("pipeline.stage", {"stage": "error", "status": "error",
+                                                "instance_id": last_running_instance[0],
+                                                "detail": {"error": f"{type(e).__name__}: {e}"}})
+            browser_put("pipeline.error", {"error": f"{type(e).__name__}: {e}"})
         finally:
             q.put(None)
 
@@ -214,12 +235,13 @@ class _StateAdapter:
     from the local, in-memory CallState -- avoids changing postcall.py for
     a one-off field-name difference between the two state backends."""
 
-    def __init__(self, state: RedisCallState, call_id: str, script: dict) -> None:
+    def __init__(self, state: RedisCallState, call_id: str, script: dict, trace_id: str) -> None:
         snap = state.snapshot()
         self.call_id, self.customer_id, self.agent_id = call_id, script["customer_id"], script["agent_id"]
         self.current_sentiment = state.current_sentiment
         self.sentiment_series = json.loads(snap.get("sentiment_series", "[]"))
         self.active_themes = state.active_themes
+        self.trace_id = trace_id
 
 
 class Handler(BaseHTTPRequestHandler):
