@@ -111,6 +111,58 @@ Reproduce: deploy any Azure OpenAI model, set `AZURE_OPENAI_*`, then
 correctness, or call `CommercialDecisionAgent.run()` directly in a loop with
 a realistic `narrator_timeout_s` to measure latency.
 
+## Load-tested against the full real backend stack
+
+Beyond the narrator, the hot-path dependencies the architecture names --
+the event stream, hot call state and guidance retrieval -- were each stood
+up for real (Azure Event Hubs, Azure Managed Redis, Azure AI Search) and
+driven through `tools/loadtest.py`, which runs the scripted golden call
+concurrently against all four real services (`src/cccp_platform/azure_backends/`)
+and reports latency percentiles per stage. Full report:
+`evals/report/loadtest_report.json`.
+
+| Stage | p50 | p95 | concurrency tested |
+|---|---|---|---|
+| End-to-end call (full script, incl. narrator) | 31.6-32.0s | 34.0-37.3s | 1, 3, 6 |
+| Narrator (`gpt-5-mini`) | 8.2-9.2s | 10.8-13.8s | 1, 3, 6 |
+| Guidance search (Azure AI Search) | 1.5-1.6s | 2.1-2.6s | 1, 3, 6 |
+| Redis round trip (hot state update) | 0.56s | 0.87s | 1, 3, 6 |
+| Event Hub publish | 0.34s | 1.0-1.6s | 1, 3, 6 |
+
+**What this does and doesn't show.** 0 errors across 18 calls (3 concurrency
+levels x 6 calls each) -- every service absorbed 6 concurrent calls without
+throttling or failing, and latency stayed essentially flat from concurrency
+1 to 6. That flatness is itself the finding: **at this scale, none of these
+managed services were the bottleneck** -- the client (this laptop, not an
+Azure-region service) was, over the public internet. A same-region
+Container App would see Redis round trips closer to low single-digit
+milliseconds, not ~560ms; this setup cannot measure that, only confirm the
+dependencies behave correctly under modest concurrency. It also does not
+test the concurrency the platform would actually see in production (tens
+of simultaneous calls, not six) -- that needs a same-region client and a
+higher concurrency sweep, which is a natural next step, not something this
+run claims to have done.
+
+**Two things broke before this worked, both instructive:**
+- Classic "Azure Cache for Redis" is being retired; the create call must
+  target **Azure Managed Redis** (`az redisenterprise`) instead -- which is
+  what docs/architecture.md already specified, so this confirmed the
+  design choice rather than changing it.
+- Azure Managed Redis defaults to `OSSCluster` policy, which routes clients
+  directly to internal shard IPs that don't match the cluster's TLS cert,
+  and still requires Redis Cluster hash-tagged keys for any multi-key
+  pipeline. Recreating the database with `EnterpriseCluster` policy (a
+  proxy in front of the shards) fixed the TLS problem; the hash-tag
+  requirement for multi-key atomicity remains either way and is reflected
+  in `redis_state.py`.
+
+Cost note: Event Hubs, Redis and AI Search (Basic -- this subscription's
+free-tier AI Search quota was already used by another project) were
+deleted immediately after this run; only the pay-as-you-go Azure OpenAI
+resource was kept. None of this is covered by the automated test suite --
+it requires live credentials and real resources, so it's validated by this
+run and this report, not by CI.
+
 ## Layout
 
 ```
@@ -129,8 +181,10 @@ src/cccp_platform/
   postcall.py    builds the post-call analytical record
   store.py       SQLite-backed analytical store (production-shaped table names)
   assistant.py   minimal keyword-routed supervisor Q&A over the store + guidance index
+  azure_backends/  real adapters: Event Hubs, Azure Managed Redis, Azure AI Search, a cloud-backed call runner
 apps/api/server.py   stdlib HTTP backend for the Workbench (no third-party deps)
 apps/web/            the Workbench page (vanilla HTML/CSS/JS)
+tools/loadtest.py    concurrent load test against the real Azure backends
 docs/            platform architecture (functional, technology, real-time, governance)
 data/synthetic/  customers, interactions, model scores, catalog, guidance
 data/calls/      the two scripted calls the Workbench runs
@@ -146,12 +200,16 @@ final text -- see `evals/report/eval_report_stub.md`); the reference slice's
 event sequencing, trigger-to-decision wiring and post-call persistence
 (25/25 unit/contract tests); narrator correctness against a live Azure
 OpenAI endpoint (16/16 eval cases, decision accuracy 1.0 -- see
-`evals/report/eval_report_azure.md` and the section above); one real
-latency data point showing a pay-as-you-go deployment does not reliably
-meet the 3s real-time budget.
+`evals/report/eval_report_azure.md`); the full hot-path dependency set
+(Event Hubs, Azure Managed Redis, Azure AI Search, Azure OpenAI) running
+for real and holding up under light concurrency (18/18 calls succeeded, 0
+errors, at concurrency 1/3/6 -- see `evals/report/loadtest_report.json`
+and the section above).
 
-Not validated: latency or cost at production call volume (one real endpoint,
-single-digit call counts -- not a load test); any other Azure service in
-docs/architecture.md (Event Hubs, Redis, AI Search, Web PubSub, etc. are
-still stdlib stand-ins); any production integration; the demo supervisor
-router as a stand-in for a real language router.
+Not validated: latency or cost at production call volume -- 6-way
+concurrency from a non-Azure client over the public internet, not tens of
+concurrent calls from a same-region service, which is what the real-time
+budget in docs/architecture.md §9.7 is actually about; Web PubSub or
+Container Apps (still a local stdlib server and in-process push); any
+production integration (identity/OBO, real guidance/transcript sources);
+the demo supervisor router as a stand-in for a real language router.

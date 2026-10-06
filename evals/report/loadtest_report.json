@@ -1,0 +1,138 @@
+{
+  "script": "golden_savings.json",
+  "narrator_timeout_s": 20.0,
+  "levels": [
+    {
+      "concurrency": 1,
+      "calls": 6,
+      "errors": 0,
+      "error_samples": [],
+      "outcomes": {
+        "recommended": 6
+      },
+      "total_call_ms": {
+        "p50": 32005.7,
+        "p95": 37270.5,
+        "p99": 37270.5,
+        "max": 37270.5,
+        "n": 6
+      },
+      "event_publish_ms": {
+        "p50": 346.8,
+        "p95": 1617.7,
+        "p99": 5199.5,
+        "max": 5309.4,
+        "n": 120
+      },
+      "redis_roundtrip_ms": {
+        "p50": 564.6,
+        "p95": 877.5,
+        "p99": 913.3,
+        "max": 913.3,
+        "n": 36
+      },
+      "narrator_ms": {
+        "p50": 8179.0,
+        "p95": 13845.0,
+        "p99": 13845.0,
+        "max": 13845.0,
+        "n": 6
+      },
+      "guidance_search_ms": {
+        "p50": 1582.0,
+        "p95": 2637.7,
+        "p99": 2637.7,
+        "max": 2637.7,
+        "n": 6
+      }
+    },
+    {
+      "concurrency": 3,
+      "calls": 6,
+      "errors": 0,
+      "error_samples": [],
+      "outcomes": {
+        "recommended": 6
+      },
+      "total_call_ms": {
+        "p50": 31691.9,
+        "p95": 34039.7,
+        "p99": 34039.7,
+        "max": 34039.7,
+        "n": 6
+      },
+      "event_publish_ms": {
+        "p50": 341.3,
+        "p95": 1022.8,
+        "p99": 5040.7,
+        "max": 5867.0,
+        "n": 120
+      },
+      "redis_roundtrip_ms": {
+        "p50": 560.7,
+        "p95": 872.1,
+        "p99": 1193.1,
+        "max": 1193.1,
+        "n": 36
+      },
+      "narrator_ms": {
+        "p50": 8715.4,
+        "p95": 11129.5,
+        "p99": 11129.5,
+        "max": 11129.5,
+        "n": 6
+      },
+      "guidance_search_ms": {
+        "p50": 1597.4,
+        "p95": 2098.3,
+        "p99": 2098.3,
+        "max": 2098.3,
+        "n": 6
+      }
+    },
+    {
+      "concurrency": 6,
+      "calls": 6,
+      "errors": 0,
+      "error_samples": [],
+      "outcomes": {
+        "recommended": 6
+      },
+      "total_call_ms": {
+        "p50": 31616.0,
+        "p95": 34422.4,
+        "p99": 34422.4,
+        "max": 34422.4,
+        "n": 6
+      },
+      "event_publish_ms": {
+        "p50": 340.3,
+        "p95": 968.8,
+        "p99": 4402.7,
+        "max": 4990.3,
+        "n": 120
+      },
+      "redis_roundtrip_ms": {
+        "p50": 556.4,
+        "p95": 865.6,
+        "p99": 1204.5,
+        "max": 1204.5,
+        "n": 36
+      },
+      "narrator_ms": {
+        "p50": 9204.3,
+        "p95": 10846.5,
+        "p99": 10846.5,
+        "max": 10846.5,
+        "n": 6
+      },
+      "guidance_search_ms": {
+        "p50": 1507.7,
+        "p95": 2653.5,
+        "p99": 2653.5,
+        "max": 2653.5,
+        "n": 6
+      }
+    }
+  ]
+}

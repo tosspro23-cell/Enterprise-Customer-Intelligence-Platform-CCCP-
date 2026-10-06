@@ -7,6 +7,15 @@ dependencies = []            # core is stdlib-only by design
 
 [project.optional-dependencies]
 azure = ["openai>=1.40", "azure-identity>=1.17"]
+# For src/cccp_platform/azure_backends/ and tools/loadtest.py: real Event
+# Hubs, Azure Managed Redis and Azure AI Search backends (cccp_agent itself
+# never needs these -- see the `azure` extra above for that).
+azure-backends = [
+    "azure-eventhub>=5.12",
+    "websocket-client>=1.8",   # azure-eventhub's websocket transport fallback
+    "azure-search-documents>=11.5",
+    "redis>=5.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

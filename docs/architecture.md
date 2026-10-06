@@ -441,11 +441,25 @@ router, and labelled as such in its own answers.
 
 See [../README.md](../README.md) for how to run both.
 
-**What this does not prove:** real-time latency at any volume, a real STT
-or event-streaming service, a real warehouse or search index, a real agent
-runtime, or a production authorisation/identity flow. The reference slice
-exists to make the decision boundaries and the event/state model legible
-end to end, not to validate the production technology choices in §4.
+**A third piece swaps the event stream, hot state and guidance retrieval
+for the real managed services** (`src/cccp_platform/azure_backends/`,
+driven by `tools/loadtest.py`): real Event Hubs, real Azure Managed Redis,
+real Azure AI Search, alongside the already-validated Azure OpenAI. This
+is the one part of the reference slice that is not a stand-in -- it is the
+actual production dependency, called from a demo client. See
+[../README.md](../README.md#load-tested-against-the-full-real-backend-stack)
+for what it found (every dependency held up under light concurrency; the
+measured latency says more about this client not being co-located with
+Azure than about the services themselves) and what it still doesn't prove
+(production concurrency, from a same-region client).
+
+**What this does not prove:** real-time latency at *production* volume
+(tens of concurrent calls from a same-region service, not six from a
+laptop), a real STT service, a real warehouse, a real agent runtime, or a
+production authorisation/identity flow. The reference slice exists to make
+the decision boundaries and the event/state model legible end to end, and
+now to confirm the chosen managed services actually work the way §4 and
+§8 assume -- not to validate production-scale technology choices on its own.
 
 ## 16. Key trade-offs
 
