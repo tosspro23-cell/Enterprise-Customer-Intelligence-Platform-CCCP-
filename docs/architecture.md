@@ -320,6 +320,22 @@ default. Real-time suggestion tokens dominate variable cost in volume, so the
 trigger policy, prompt caching and a small real-time model are the primary
 cost levers -- not the choice of model for the assistant.
 
+**Reasoning models need their own line in this table, not a shared one.**
+Measured against a live deployment (see [../README.md](../README.md#validated-against-a-live-azure-openai-endpoint)):
+a reasoning-family model (`gpt-5-mini`) spends several hundred hidden
+"reasoning" tokens before writing any visible output, which (a) makes
+round-trip latency unsuitable for the real-time profile's 3s budget even
+though output quality and grounding were correct in every case tested, and
+(b) can silently return empty content -- not an error -- if the real-time
+profile's lean token budget (§9.7) doesn't also cover that hidden spend. A
+non-reasoning model is the correct default for the real-time and commercial
+explanation profiles; a reasoning model is a legitimate choice for the
+assistant or post-call synthesis profiles, where the latency budget can
+absorb it. Even a non-reasoning model, pay-as-you-go and unprovisioned,
+showed real latency variance across three otherwise-identical calls (2.75s,
+4.05s, 12.64s) -- one data point for the provisioned-throughput argument in
+§15.2, not a substitute for measuring it at the pilot's actual trigger rate.
+
 ## 12. LLMOps / lifecycle management
 
 One release unit covers application code, prompt templates, the model

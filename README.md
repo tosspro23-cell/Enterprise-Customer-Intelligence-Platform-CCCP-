@@ -44,9 +44,11 @@ python demo.py cust_001 -0.7                 # same customer, live call strongly
 
 Stdlib only (Python >= 3.11). Optional real LLM backend:
 `pip install .[azure]`, set `AZURE_OPENAI_*` (see `adapters/azure_openai.py`),
-then `python evals/run_evals.py --narrator azure` (adversarial-narrator cases
-are skipped in that mode; the Azure adapter has **not** been validated
-against a live endpoint).
+then `python evals/run_evals.py --narrator azure --narrator-timeout 20`
+(adversarial-narrator cases are skipped in that mode; `--narrator-timeout`
+defaults to 2.5s, matching the real-time SLA -- raise it to evaluate output
+quality on its own rather than against that budget). **This has been
+validated against a live endpoint** -- see the next section.
 
 ## The reference slice: Workbench demo
 
@@ -85,6 +87,30 @@ Everything in `apps/` and `src/cccp_platform/` is demo infrastructure
 (stdlib `http.server`, in-memory event bus, SQLite). The only production
 code path it exercises is `cccp_agent` itself.
 
+## Validated against a live Azure OpenAI endpoint
+
+The narrator was run against two real deployments on a dedicated Azure
+OpenAI resource (not the bundled synthetic stub). Both results are real
+measurements, not design estimates -- and one of them overturns a design
+assumption rather than confirming it:
+
+| Deployment | Role tested | Result |
+|---|---|---|
+| `gpt-5-mini` (reasoning model) | correctness of the generated explanation | **16/16 eval cases pass, decision accuracy 1.0, 0 policy violations** when given a generous timeout (`--narrator-timeout 20`) -- see `evals/report/eval_report_azure.md`. **Not viable for the real-time profile as configured**: it spends hidden "reasoning tokens" before writing any visible output (~550-650 tokens for this prompt), round-trip latency measured at 7-10.6s against the architecture's 3s real-time budget, and with the real-time profile's lean 400-token budget (docs/architecture.md §9.7) the reasoning alone can exhaust it and return **empty content with no error** -- a silent failure mode a non-reasoning model doesn't have. The agent's validator/timeout/fallback caught every one of these safely; nothing bad ever reached a result. |
+| `gpt-4.1-mini` (non-reasoning model) | real-time latency budget | 3 identical calls measured **2.75s, 4.05s, 12.64s** -- network/provider latency variance alone put one of three calls over even a 3s timeout, which the agent correctly caught and fell back from. |
+
+This is exactly the kind of number the architecture doc could only mark
+**[Design]** before (§9.7, §15.2: "decide after the pilot measures actual
+latency" / "provisioned throughput ... decide after the pilot"). It now has
+one real data point: **a pay-as-you-go, non-provisioned deployment does not
+reliably hit a 3-second real-time budget**, which is the concrete argument
+for the provisioned-throughput design in §15.2, not just a theoretical one.
+
+Reproduce: deploy any Azure OpenAI model, set `AZURE_OPENAI_*`, then
+`python evals/run_evals.py --narrator azure --narrator-timeout 20` for
+correctness, or call `CommercialDecisionAgent.run()` directly in a loop with
+a realistic `narrator_timeout_s` to measure latency.
+
 ## Layout
 
 ```
@@ -116,9 +142,16 @@ tests/           unit / contract tests (agent + reference slice)
 
 Validated: policy/eval behaviour on synthetic scenarios with a deterministic
 narrator stub (22/22 evals pass, 0 critical failures, 0 policy violations in
-final text -- see `evals/report/`); the reference slice's event sequencing,
-trigger-to-decision wiring and post-call persistence (25/25 unit/contract
-tests).
-Not validated: real LLM quality, latency at scale, any production
-integration, or the demo supervisor router as a stand-in for a real language
-router.
+final text -- see `evals/report/eval_report_stub.md`); the reference slice's
+event sequencing, trigger-to-decision wiring and post-call persistence
+(25/25 unit/contract tests); narrator correctness against a live Azure
+OpenAI endpoint (16/16 eval cases, decision accuracy 1.0 -- see
+`evals/report/eval_report_azure.md` and the section above); one real
+latency data point showing a pay-as-you-go deployment does not reliably
+meet the 3s real-time budget.
+
+Not validated: latency or cost at production call volume (one real endpoint,
+single-digit call counts -- not a load test); any other Azure service in
+docs/architecture.md (Event Hubs, Redis, AI Search, Web PubSub, etc. are
+still stdlib stand-ins); any production integration; the demo supervisor
+router as a stand-in for a real language router.

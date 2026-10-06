@@ -29,7 +29,7 @@ from cccp_agent.narrative import GLOBAL_PROHIBITED  # noqa: E402
 GATE_OUTCOMES = {"suppressed", "deferred", "specialist_handoff"}
 
 
-def run_case(case: dict, estate: SyntheticEstate, as_of: date, narrator_mode: str) -> dict:
+def run_case(case: dict, estate: SyntheticEstate, as_of: date, narrator_mode: str, narrator_timeout_s: float) -> dict:
     faults = case.get("faults", {})
     model = estate.model_port(faults.get("model"))
     if narrator_mode == "azure":
@@ -39,7 +39,7 @@ def run_case(case: dict, estate: SyntheticEstate, as_of: date, narrator_mode: st
         narrator = StubNarrator(faults.get("narrator", "faithful"))
     agent = CommercialDecisionAgent(
         estate.customer_port(), estate.interaction_port(faults.get("interactions")), model,
-        estate.guidance_port(faults.get("guidance")), estate.catalog, narrator)
+        estate.guidance_port(faults.get("guidance")), estate.catalog, narrator, narrator_timeout_s=narrator_timeout_s)
     inp = case["input"]
     live = LiveCallSignal(**{**inp["live_signal"], "active_themes": tuple(inp["live_signal"].get("active_themes", []))}) \
         if inp.get("live_signal") else None
@@ -156,6 +156,10 @@ def to_markdown(suite: dict, results: list[dict], m: dict, narrator_mode: str) -
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--narrator", choices=["stub", "azure"], default="stub")
+    ap.add_argument("--narrator-timeout", type=float, default=2.5,
+                     help="seconds before the agent gives up on the narrator and falls back to the template "
+                          "(2.5s matches the real-time profile's SLA; a slower deployment needs a larger value "
+                          "to be evaluated on output quality rather than on whether it meets that SLA)")
     ap.add_argument("--cases", default=str(ROOT / "evals" / "cases.json"))
     ap.add_argument("--out", default=str(ROOT / "evals" / "report"))
     a = ap.parse_args()
@@ -167,7 +171,7 @@ def main() -> int:
     results = []
     for c in cases:
         try:
-            results.append(run_case(c, estate, as_of, a.narrator))
+            results.append(run_case(c, estate, as_of, a.narrator, a.narrator_timeout))
         except Exception as e:  # an agent crash is a failed case, never a silent skip
             results.append({"id": c["id"], "title": c["title"], "category": c["category"],
                             "critical": c.get("critical", False), "passed": False,

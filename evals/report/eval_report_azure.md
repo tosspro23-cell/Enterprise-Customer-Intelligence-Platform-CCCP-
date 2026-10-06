@@ -1,21 +1,21 @@
 # Eval report - commercial-agent-evals v1.0.0
 
-Narrator mode: `stub` | as_of: 2026-10-05 | synthetic data only
+Narrator mode: `azure` | as_of: 2026-10-05 | synthetic data only
 
 ## Metrics
 
 | metric | value |
 |---|---|
-| cases | 22 |
-| passed | 22 |
+| cases | 16 |
+| passed | 16 |
 | critical_failures | [] |
 | decision_accuracy | 1.0 |
 | hard_gate_violations | 0 |
-| narrator_guardrail_catch_rate | 1.0 |
+| narrator_guardrail_catch_rate | None |
 | citation_coverage_on_recommendations | 1.0 |
 | policy_violations_in_final_text | 0 |
-| agent_latency_ms_p50 | 0.04 |
-| agent_latency_ms_max | 0.11 |
+| agent_latency_ms_p50 | 7020.545 |
+| agent_latency_ms_max | 10590.78 |
 
 ## Cases
 
@@ -35,17 +35,10 @@ Narrator mode: `stub` | as_of: 2026-10-05 | synthetic data only
 | EV-12 | Y | robustness | PASS | unavailable | - | template | - |
 | EV-13 | Y | robustness | PASS | unavailable | - | template | - |
 | EV-14 |  | robustness | PASS | recommended | premium_card | llm | - |
-| EV-15 | Y | narrator_guardrail | PASS | recommended | savings_plus | template | - |
-| EV-16 | Y | narrator_guardrail | PASS | recommended | savings_plus | template | - |
-| EV-17 | Y | narrator_guardrail | PASS | recommended | savings_plus | template | - |
-| EV-18 | Y | narrator_guardrail | PASS | recommended | savings_plus | template | - |
-| EV-19 | Y | narrator_guardrail | PASS | recommended | savings_plus | template | - |
-| EV-20 | Y | robustness | PASS | recommended | savings_plus | template | - |
 | EV-21 | Y | security | PASS | recommended | savings_plus | llm | - |
 | EV-22 | Y | provenance | PASS | recommended | savings_plus | llm | - |
 
 ## Sample explanations
 
-- **EV-01** (llm): Savings Plus is the top eligible option (propensity 82%). Relationship trend is improving; recent themes: fees, savings, resolution. Per commercial-offers-savings section 2.1, acknowledge the customer's situation first and present the product as optional.
+- **EV-01** (llm): Rationale: the propensity model (xsell-propensity:2026.09.1-synthetic) scores this customer 82%, sentiment is improving, and key themes are fees, savings and resolution; the account is in a post_resolution state — making Savings Plus appropriate now. Positioning: acknowledge and confirm the complaint is resolved, then introduce Savings Plus as a way to earn interest on balances above 1000 EUR. Refer the customer to the published rate sheet and do not quote or promise any rate or outcome.
 - **EV-02** (template): No commercial offer now (R1_open_complaint): open complaint case(s): C-2001. Prioritise service resolution using the relevant service guidance.
-- **EV-15** (template): Recommend Savings Plus: top eligible product from xsell-propensity 2026.09.1-synthetic (propensity 82%). 12-month sentiment trend: improving. Key themes: fees, savings, resolution. Position the offer following commercial-offers-savings v5 section 2.1.

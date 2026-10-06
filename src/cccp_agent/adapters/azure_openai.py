@@ -42,8 +42,14 @@ class AzureOpenAINarrator:
                 messages=[{"role": "system", "content": system},
                           {"role": "user", "content": json.dumps(payload)}],
                 response_format={"type": "json_object"},
-                temperature=0.2,
-                max_tokens=400,
+                # Reasoning-family deployments (e.g. gpt-5-mini) reject a custom
+                # temperature and the legacy max_tokens param; max_completion_tokens
+                # is the unified field both older and newer chat models accept.
+                # It must also cover hidden reasoning tokens for those models -- too
+                # tight a budget burns entirely on reasoning and returns empty content
+                # rather than an error (measured: ~550-650 reasoning tokens for this
+                # prompt). 1500 leaves headroom above that plus the real response.
+                max_completion_tokens=1500,
                 timeout=timeout_s,
             )
         except self._timeout_exc as e:
