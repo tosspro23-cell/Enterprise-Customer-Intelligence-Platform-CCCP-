@@ -32,8 +32,14 @@ def run_call(
     sink: Callable[[Any], None],
     as_of: date,
     pace: bool = True,
+    customer_profile: dict[str, Any] | None = None,
 ) -> tuple[CallState, list[DecisionResult]]:
     """Runs one scripted call end to end, emitting events to `sink` as it goes.
+
+    `customer_profile` is presentation-only (name, segment, region, products,
+    flags) for the Workbench to show who's on the call -- the caller builds
+    it from whatever customer directory it has; this module doesn't know
+    about that directory's implementation.
 
     Returns the final hot-call state and every DecisionResult produced
     during the call, for the post-call handoff.
@@ -44,7 +50,10 @@ def run_call(
     state = CallState(call_id, customer_id, agent_id, trace_id=trace_id)
     decisions: list[DecisionResult] = []
 
-    seq.emit(CALL_STARTED, {"customer_id": customer_id, "agent_id": agent_id})
+    started_payload = {"customer_id": customer_id, "agent_id": agent_id}
+    if customer_profile:
+        started_payload["customer_profile"] = customer_profile
+    seq.emit(CALL_STARTED, started_payload)
 
     for turn in script["utterances"]:
         if pace:

@@ -31,12 +31,17 @@ class SyntheticEstate:
         self.catalog = {p["product_id"]: Product(p["product_id"], p["name"], tuple(p["regions"]),
                                                    tuple(p["segments"]), p["min_propensity"], p["priority"])
                         for p in _load("products.json", data_dir)}
+        customer_rows = _load("customers.json", data_dir)
         self._customers = {
             c["customer_id"]: Customer(
                 c["customer_id"], c["segment"], c["region"], tuple(c["products"]), tuple(c.get("flags", [])),
                 tuple(Case(k["case_id"], k["case_type"], k["status"], _date(k["opened_at"]),
                            _date(k.get("resolved_at"))) for k in c.get("cases", [])))
-            for c in _load("customers.json", data_dir)}
+            for c in customer_rows}
+        # Display name is presentation-only -- the policy engine never sees it
+        # (Customer above has no such field), it's purely so the Workbench can
+        # show who's on the call instead of just a customer_id.
+        self._display_names = {c["customer_id"]: c.get("name", "") for c in customer_rows}
         self._interactions = [
             Interaction(i["interaction_id"], i["customer_id"], _date(i["occurred_at"]), i["channel"],
                         i["sentiment_score"], tuple(i["themes"]), i["summary"],
@@ -57,6 +62,9 @@ class SyntheticEstate:
 
     def customer_port(self) -> "SyntheticCustomers":
         return SyntheticCustomers(self._customers)
+
+    def display_name(self, customer_id: str) -> str:
+        return self._display_names.get(customer_id, "")
 
     def interaction_port(self, fault: str | None = None) -> "SyntheticInteractions":
         return SyntheticInteractions(self._interactions, fault)

@@ -43,6 +43,11 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
+# Two different neural voices so a played-back call sounds like two people,
+# not one voice reading both parts.
+CUSTOMER_VOICE = "en-US-JennyNeural"
+AGENT_VOICE = "en-US-GuyNeural"
+
 from cccp_agent import CommercialDecisionAgent, DecisionRequest, LiveCallSignal  # noqa: E402
 from cccp_agent.adapters.azure_openai import AzureOpenAINarrator  # noqa: E402
 from cccp_agent.adapters.synthetic import SyntheticEstate  # noqa: E402
@@ -129,10 +134,29 @@ def start_call(script_id: str) -> str:
                                              narrator_timeout_s=20.0)
             decisions = []
 
-            seq.emit(CALL_STARTED, {"customer_id": script["customer_id"], "agent_id": script["agent_id"]})
+            customer_record = estate.customer_port().get_customer(script["customer_id"])
+            seq.emit(CALL_STARTED, {
+                "customer_id": script["customer_id"], "agent_id": script["agent_id"],
+                "customer_profile": {
+                    "name": estate.display_name(script["customer_id"]),
+                    "segment": customer_record.segment, "region": customer_record.region,
+                    "products": list(customer_record.products), "flags": list(customer_record.flags),
+                },
+            })
 
             for turn in script["utterances"]:
                 if turn["channel"] != "customer":
+                    # Agent lines aren't re-transcribed (there's no live mic input to
+                    # verify against) -- just synthesised, so a voice playback of the
+                    # whole call has both sides, not just the customer's.
+                    snippet = turn["text"][:42] + ("…" if len(turn["text"]) > 42 else "")
+                    browser_put("pipeline.group", {"kind": "turn", "label": f"Agent turn: “{snippet}”"})
+                    iid = stage_start("tts")
+                    t0 = time.perf_counter()
+                    agent_audio = speech_synthesize(turn["text"], voice=AGENT_VOICE)
+                    stage_done("tts", iid, (time.perf_counter() - t0) * 1000, {"text": turn["text"]})
+                    browser_put("pipeline.audio", {"instance_id": iid,
+                                                    "audio_base64": base64.b64encode(agent_audio).decode("ascii")})
                     seq.emit(UTTERANCE_FINAL, {"channel": turn["channel"], "text": turn["text"]})
                     continue
 
@@ -142,7 +166,7 @@ def start_call(script_id: str) -> str:
                 # --- real voice path: synthesise this line, transcribe it back ---
                 iid = stage_start("stt")
                 t0 = time.perf_counter()
-                audio = speech_synthesize(turn["text"])
+                audio = speech_synthesize(turn["text"], voice=CUSTOMER_VOICE)
                 tts_s = time.perf_counter() - t0
                 t0 = time.perf_counter()
                 stt_result = speech_transcribe(audio)

@@ -5,7 +5,8 @@ const sentimentFillEl = document.getElementById("sentiment-fill");
 const themesEl = document.getElementById("themes");
 const statusAreaEl = document.getElementById("status-area");
 const suggestionAreaEl = document.getElementById("suggestion-area");
-const traceEl = document.getElementById("trace");
+const traceNowEl = document.getElementById("trace-now");
+const traceTimelineEl = document.getElementById("trace-timeline");
 const logEl = document.getElementById("log");
 const answerEl = document.getElementById("answer");
 const quickEl = document.getElementById("quick");
@@ -16,8 +17,11 @@ const pbNextEl = document.getElementById("pb-next");
 const pbStatusEl = document.getElementById("pb-status");
 const pbVoiceToggleEl = document.getElementById("pb-voice-toggle");
 const pbSpeedEl = document.getElementById("pb-speed");
-const traceCurrentEl = document.getElementById("trace-current");
-const traceCurrentTextEl = document.getElementById("trace-current-text");
+const profileBarEl = document.getElementById("profile-bar");
+const profileAvatarEl = document.getElementById("profile-avatar");
+const profileNameEl = document.getElementById("profile-name");
+const profileMetaEl = document.getElementById("profile-meta");
+const profileChipsEl = document.getElementById("profile-chips");
 
 // What each pipeline stage is, which system backs it, and -- just as
 // important -- whether that system call is real (hits Azure) or a local
@@ -29,6 +33,9 @@ const STAGE_CATALOG = {
   stt: { code: "STT", label: "Speech-to-Text", system: "Azure AI Speech", source: "cloud",
     business: "Turns the customer's spoken words into text the system can act on.",
     technical: "Real-time streaming STT (PushAudioInputStream). Audio is synthesised by Azure TTS for this demo -- there is no live phone call behind it." },
+  tts: { code: "TTS", label: "Agent Voice Synthesis", system: "Azure AI Speech", source: "cloud",
+    business: "Turns the agent's scripted line into audio so it can be played back.",
+    technical: "Azure neural TTS (speak_text_async), a different voice than the customer's. Not re-transcribed -- there's no live mic input to verify the agent's side against." },
   sentiment: { code: "SENT", label: "Sentiment Scoring", system: "Azure AI Language", source: "cloud",
     business: "Scores how positive or negative the customer sounds, right now.",
     technical: "analyze_sentiment API; positive_confidence minus negative_confidence, mapped to [-1, 1]." },
@@ -65,7 +72,12 @@ function logLine(evt) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-let traceRowsById = {};
+// Pipeline-trace state: one record per stage instance (business/technical/
+// detail/status/audio), a timeline chip per instance for the compact strip,
+// and which instance the big "now" card is currently showing.
+let stageRecords = {};
+let timelineChipsById = {};
+let currentNowInstanceId = null;
 
 function resetPanels() {
   resetPlayback();
@@ -80,12 +92,38 @@ function resetPanels() {
   statusAreaEl.appendChild(emptySpan("No decision yet."));
   suggestionAreaEl.innerHTML = "";
   logEl.innerHTML = "";
-  clearChildren(traceEl);
-  traceEl.appendChild(emptySpan("Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on."));
-  traceRowsById = {};
-  currentGroupBody = null;
-  currentRunningRow = null;
-  setCurrentStep("Not running", true);
+  stageRecords = {};
+  timelineChipsById = {};
+  currentNowInstanceId = null;
+  traceNowEl.className = "trace-now idle";
+  traceNowEl.innerHTML = '<div class="trace-now-empty">Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on.</div>';
+  clearChildren(traceTimelineEl);
+  traceTimelineEl.appendChild(emptySpan("No steps yet."));
+  resetProfile();
+}
+
+function resetProfile() {
+  profileBarEl.classList.remove("active");
+  profileAvatarEl.textContent = "–";
+  profileNameEl.textContent = "No active call";
+  profileMetaEl.textContent = "Run a scenario to see who you're talking to.";
+  clearChildren(profileChipsEl);
+}
+
+function renderProfile(customerId, profile) {
+  if (!profile) return;
+  profileBarEl.classList.add("active");
+  const name = profile.name || customerId;
+  profileAvatarEl.textContent = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  profileNameEl.textContent = `${name} — ${customerId}`;
+  profileMetaEl.textContent = `${profile.segment || "?"} segment · region ${profile.region || "?"} · holds: ${(profile.products || []).join(", ") || "none"}`;
+  clearChildren(profileChipsEl);
+  for (const flag of profile.flags || []) {
+    const chip = document.createElement("span");
+    chip.className = "chip flag";
+    chip.textContent = flag.replace(/_/g, " ");
+    profileChipsEl.appendChild(chip);
+  }
 }
 
 function showTypingIndicator() {
@@ -102,7 +140,7 @@ function hideTypingIndicator() {
   if (b) b.remove();
 }
 
-function appendBubble(channel, text, sttDetail) {
+function appendBubble(channel, text) {
   hideTypingIndicator();
   if (transcriptEl.querySelector(".empty")) clearChildren(transcriptEl);
   const b = document.createElement("div");
@@ -112,12 +150,9 @@ function appendBubble(channel, text, sttDetail) {
   ch.textContent = channel;
   b.appendChild(ch);
   b.appendChild(document.createTextNode(text));
-  if (sttDetail && sttDetail.recognized_text && sttDetail.recognized_text !== text) {
-    const diff = document.createElement("span");
-    diff.className = "stt-diff";
-    diff.textContent = `Azure STT heard: "${sttDetail.recognized_text}"`;
-    b.appendChild(diff);
-  }
+  // What STT actually recognized (vs. the scripted line) lives in the
+  // pipeline trace's STT stage detail, not here -- this stays a clean,
+  // read-as-a-conversation transcript on both sides.
   transcriptEl.appendChild(b);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
 }
@@ -198,22 +233,6 @@ function showPostcall(payload) {
 }
 
 const TRACE_SCALE_MS = 10000; // bar width reference -- the narrator stage runs several seconds
-let currentGroupBody = null;   // where new stage rows get appended -- set by handleGroup()
-let currentRunningRow = null;  // the one row currently highlighted as "happening now"
-
-// A group is purely organisational (which conversation turn, or "the
-// decision" a trigger kicked off) -- it's never a real fact about the call,
-// so like the "running" stage marker it's browser-only, not published.
-function handleGroup(p) {
-  if (traceEl.querySelector(".empty")) clearChildren(traceEl);
-  const group = document.createElement("div");
-  group.className = `trace-group kind-${p.kind}`;
-  group.innerHTML = `<div class="trace-group-header"><span class="trace-group-dot"></span>${p.label}</div>
-    <div class="trace-group-body"></div>`;
-  traceEl.appendChild(group);
-  currentGroupBody = group.querySelector(".trace-group-body");
-  traceEl.scrollTop = traceEl.scrollHeight;
-}
 
 // Most `detail` payloads are now {label: [readable strings]} on purpose
 // (built server-side from real evidence/scores/policy decisions) -- rendered
@@ -243,78 +262,101 @@ function renderDetailList(container, detail) {
   return any;
 }
 
-function setCurrentStep(text, idle) {
-  traceCurrentTextEl.textContent = text;
-  traceCurrentEl.classList.toggle("idle", !!idle);
+// A group is purely organisational (which conversation turn, or "the
+// decision" a trigger kicked off) -- it's never a real fact about the call,
+// so like each node's "running" state it's browser-only, not published.
+// It shows up in the compact timeline as a small divider between nodes.
+function handleGroup(p) {
+  if (traceTimelineEl.querySelector(".empty")) clearChildren(traceTimelineEl);
+  const div = document.createElement("div");
+  div.className = `timeline-divider kind-${p.kind}`;
+  div.title = p.label;
+  traceTimelineEl.appendChild(div);
+  traceTimelineEl.scrollLeft = traceTimelineEl.scrollWidth;
+}
+
+// The big "now" card always shows whichever stage instance was most recently
+// started/finished -- that's "what's happening right now" while a call is
+// live, and "what just happened" once it's paused. Clicking an older node in
+// the timeline strip below re-points it at that node's detail instead, for a
+// quick look back; the next stage event pulls it back to live.
+function renderNowCard(instanceId) {
+  const rec = stageRecords[instanceId];
+  if (!rec) return;
+  currentNowInstanceId = instanceId;
+  const meta = STAGE_CATALOG[rec.stage] || { code: rec.stage.slice(0, 5).toUpperCase(), label: rec.stage, system: "", source: "local", business: "", technical: "" };
+  traceNowEl.className = `trace-now source-${meta.source} status-${rec.status}`;
+  const ms = typeof rec.ms === "number" ? rec.ms : null;
+  traceNowEl.innerHTML = `
+    <div class="now-head">
+      <span class="now-code">${meta.code}</span>
+      <div class="now-text">
+        <div class="now-label">${meta.label}<span class="now-system">${meta.system}</span></div>
+        <div class="now-business">${meta.business}</div>
+      </div>
+      <span class="now-status status-${rec.status}">${rec.status}</span>
+      <span class="now-ms">${ms !== null ? ms.toFixed(0) + " ms" : ""}</span>
+    </div>
+    <div class="now-bar-track"><div class="now-bar-fill" style="width:${ms !== null ? Math.min(100, Math.round((ms / TRACE_SCALE_MS) * 100)) : 0}%"></div></div>
+    <div class="now-detail"></div>
+    <div class="now-technical">${meta.technical}</div>
+    <div class="now-eh-note">${typeof rec.ehMs === "number" ? `+ published to Event Hubs in ${rec.ehMs.toFixed(0)} ms` : ""}</div>`;
+  const detailEl = traceNowEl.querySelector(".now-detail");
+  if (rec.status === "error" && rec.detail && rec.detail.error) {
+    const raw = document.createElement("pre");
+    raw.className = "trace-raw";
+    raw.textContent = rec.detail.error;
+    detailEl.appendChild(raw);
+  } else if (rec.detail && Object.keys(rec.detail).length) {
+    const hadList = renderDetailList(detailEl, rec.detail);
+    const leftover = Object.fromEntries(Object.entries(rec.detail).filter(([, v]) => !Array.isArray(v)));
+    if (!hadList || Object.keys(leftover).length) {
+      const raw = document.createElement("pre");
+      raw.className = "trace-raw";
+      raw.textContent = JSON.stringify(hadList ? leftover : rec.detail, null, 2);
+      detailEl.appendChild(raw);
+    }
+  }
+  if (rec.audioB64) {
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.style.cssText = "width:100%;height:28px;margin-top:8px;";
+    audio.src = `data:audio/wav;base64,${rec.audioB64}`;
+    traceNowEl.appendChild(audio);
+  }
+}
+
+function addTimelineNode(instanceId, stage) {
+  if (traceTimelineEl.querySelector(".empty")) clearChildren(traceTimelineEl);
+  const meta = STAGE_CATALOG[stage] || { code: stage.slice(0, 5).toUpperCase(), source: "local" };
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = `trace-code source-${meta.source} status-running`;
+  chip.title = meta.label || stage;
+  chip.textContent = meta.code;
+  chip.addEventListener("click", () => renderNowCard(instanceId));
+  traceTimelineEl.appendChild(chip);
+  timelineChipsById[instanceId] = chip;
+  traceTimelineEl.scrollLeft = traceTimelineEl.scrollWidth;
+  return chip;
 }
 
 function handleStage(p) {
-  const meta = STAGE_CATALOG[p.stage] || { code: p.stage.slice(0, 5).toUpperCase(), label: p.stage, system: "", source: "local", business: "", technical: "" };
-  let entry = traceRowsById[p.instance_id];
-  if (!entry) {
-    const row = document.createElement("div");
-    row.className = `trace-row source-${meta.source}`;
-    row.innerHTML = `
-      <div class="trace-row-main">
-        <span class="trace-code">${meta.code}</span>
-        <div class="trace-row-text">
-          <div class="trace-label">${meta.label}<span class="trace-system">${meta.system}</span></div>
-          <div class="trace-business">${meta.business}</div>
-        </div>
-        <span class="trace-status trace-status-running">running</span>
-        <span class="trace-ms"></span>
-      </div>
-      <div class="trace-bar-track"><div class="trace-bar-fill" style="width:0%"></div></div>
-      <div class="trace-detail-rendered"></div>
-      <details>
-        <summary>technical detail</summary>
-        <div class="trace-technical">${meta.technical}</div>
-        <div class="trace-eh-note"></div>
-        <pre class="trace-raw" style="display:none"></pre>
-      </details>`;
-    (currentGroupBody || traceEl).appendChild(row);
-    entry = { el: row };
-    traceRowsById[p.instance_id] = entry;
-  }
-  const row = entry.el;
+  let chip = timelineChipsById[p.instance_id];
+  if (!chip) chip = addTimelineNode(p.instance_id, p.stage);
+
   if (p.status === "running") {
-    if (currentRunningRow) currentRunningRow.classList.remove("is-current");
-    row.classList.add("is-current");
-    currentRunningRow = row;
-    setCurrentStep(`${meta.label} — ${meta.system || "local"}`);
+    stageRecords[p.instance_id] = { stage: p.stage, status: "running" };
+    chip.className = chip.className.replace(/status-\S+/, "status-running");
   } else if (p.status === "done") {
-    row.classList.remove("is-current");
-    if (currentRunningRow === row) { currentRunningRow = null; setCurrentStep("Idle, waiting for next step", true); }
-    row.querySelector(".trace-status").className = "trace-status trace-status-done";
-    row.querySelector(".trace-status").textContent = "done";
-    const ms = typeof p.ms === "number" ? p.ms : 0;
-    row.querySelector(".trace-ms").textContent = `${ms.toFixed(0)} ms`;
-    row.querySelector(".trace-bar-fill").style.width = Math.min(100, Math.round((ms / TRACE_SCALE_MS) * 100)) + "%";
-    if (p.detail && Object.keys(p.detail).length) {
-      const rendered = row.querySelector(".trace-detail-rendered");
-      const hadList = renderDetailList(rendered, p.detail);
-      const leftover = Object.fromEntries(Object.entries(p.detail).filter(([, v]) => !Array.isArray(v)));
-      if (!hadList || Object.keys(leftover).length) {
-        const raw = row.querySelector(".trace-raw");
-        raw.style.display = "block";
-        raw.textContent = JSON.stringify(hadList ? leftover : p.detail, null, 2);
-      }
-    }
+    stageRecords[p.instance_id] = { stage: p.stage, status: "done", ms: p.ms, detail: p.detail,
+                                     ehMs: p._eh_publish_ms, audioB64: stageRecords[p.instance_id]?.audioB64 };
+    chip.className = chip.className.replace(/status-\S+/, "status-done");
   } else if (p.status === "error") {
-    row.classList.remove("is-current");
-    if (currentRunningRow === row) { currentRunningRow = null; setCurrentStep("Failed -- see detail below", true); }
-    row.querySelector(".trace-status").className = "trace-status trace-status-error";
-    row.querySelector(".trace-status").textContent = "failed";
-    if (p.detail && p.detail.error) {
-      const raw = row.querySelector(".trace-raw");
-      raw.style.display = "block";
-      raw.textContent = p.detail.error;
-    }
+    stageRecords[p.instance_id] = { stage: p.stage, status: "error", detail: p.detail };
+    chip.className = chip.className.replace(/status-\S+/, "status-error");
   }
-  if (typeof p._eh_publish_ms === "number") {
-    row.querySelector(".trace-eh-note").textContent = `+ published to Event Hubs in ${p._eh_publish_ms.toFixed(0)} ms`;
-  }
-  traceEl.scrollTop = traceEl.scrollHeight;
+  renderNowCard(p.instance_id);
 }
 
 // -------------------------------------------------------------- paced reveal
@@ -389,8 +431,7 @@ function enqueueEvent(evt) {
 function tryPlayVoice(evt) {
   if (!voiceEnabled) return false;
   if (evt?.event_type !== "transcript.utterance_final") return false;
-  if ((evt.payload || {}).channel !== "customer") return false;
-  if (!pendingAudioB64) return false;
+  if (!pendingAudioB64) return false;  // set for both customer and agent lines now
   const audio = new Audio(`data:audio/wav;base64,${pendingAudioB64}`);
   pendingAudioB64 = null;
   if (currentAudio) currentAudio.pause();
@@ -509,16 +550,13 @@ function dispatch(evt) {
   }
   if (evt.event_type === "pipeline.audio") {
     // Stashed for the matching transcript.utterance_final bubble (next in the
-    // queue) to pick up and play if voice mode is on -- see tryPlayVoice().
+    // queue, customer or agent) to pick up and play if voice mode is on --
+    // see tryPlayVoice(). Also cached on the stage record so it's there if
+    // that node's chip gets clicked later, after pendingAudioB64 is spent.
     pendingAudioB64 = p.audio_base64 || null;
-    const entry = traceRowsById[p.instance_id];
-    if (entry && p.audio_base64) {
-      const audio = document.createElement("audio");
-      audio.controls = true;
-      audio.style.cssText = "width:100%;height:28px;margin-top:6px;";
-      audio.src = `data:audio/wav;base64,${p.audio_base64}`;
-      entry.el.querySelector(".trace-row-main").insertAdjacentElement("afterend", audio);
-    }
+    const rec = stageRecords[p.instance_id];
+    if (rec) rec.audioB64 = p.audio_base64;
+    if (p.instance_id === currentNowInstanceId) renderNowCard(p.instance_id);
     return;
   }
   if (evt.event_type === "pipeline.error") {
@@ -534,8 +572,11 @@ function dispatch(evt) {
     return;
   }
   switch (evt.event_type) {
+    case "call.started":
+      renderProfile(p.customer_id, p.customer_profile);
+      break;
     case "transcript.utterance_final":
-      appendBubble(p.channel, p.text, p._stt);
+      appendBubble(p.channel, p.text);
       break;
     case "sentiment.updated":
       updateSentiment(p.rolling_sentiment);

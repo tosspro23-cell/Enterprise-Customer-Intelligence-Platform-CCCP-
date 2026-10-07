@@ -32,10 +32,17 @@ class SttResult:
     recognition_s: float
 
 
-def synthesize(text: str) -> bytes:
-    """Text -> WAV bytes (16kHz mono PCM) via Azure neural TTS."""
+def synthesize(text: str, voice: str | None = None) -> bytes:
+    """Text -> WAV bytes (16kHz mono PCM) via Azure neural TTS.
+
+    `voice` picks the neural voice (e.g. "en-US-JennyNeural") -- the Workbench
+    uses two different voices for customer vs. agent so a played-back call
+    sounds like two people, not one voice reading both sides.
+    """
     cfg = _speech_config()
     cfg.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm)
+    if voice:
+        cfg.speech_synthesis_voice_name = voice
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=cfg, audio_config=None)
     result = synthesizer.speak_text_async(text).get()
     if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:

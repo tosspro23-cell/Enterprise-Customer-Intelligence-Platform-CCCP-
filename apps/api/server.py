@@ -62,7 +62,12 @@ def start_call(script_id: str) -> str:
             q.put(d)
 
         try:
-            state, decisions = run_call(dict(script, call_id=run_id), _make_agent(), sink, AS_OF, pace=True)
+            customer_record = estate.customer_port().get_customer(script["customer_id"])
+            profile = {"name": estate.display_name(script["customer_id"]), "segment": customer_record.segment,
+                       "region": customer_record.region, "products": list(customer_record.products),
+                       "flags": list(customer_record.flags)}
+            state, decisions = run_call(dict(script, call_id=run_id), _make_agent(), sink, AS_OF, pace=True,
+                                         customer_profile=profile)
             rec = build_enrichment(state, decisions)
             store.insert_call(rec, scenario_id=script_id)
             postcall_evt = {"event_type": "postcall.enrichment_completed", "call_id": run_id,

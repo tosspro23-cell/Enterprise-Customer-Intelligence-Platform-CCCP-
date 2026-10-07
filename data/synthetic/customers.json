@@ -1,17 +1,17 @@
 [
-  {"customer_id": "cust_001", "_note": "Sarah Chen - golden scenario: fee complaint resolved, relationship improving",
+  {"customer_id": "cust_001", "name": "Sarah Chen", "_note": "golden scenario: fee complaint resolved, relationship improving",
    "segment": "high_value", "region": "ES", "products": ["current_account", "credit_card"],
    "cases": [{"case_id": "C-1001", "case_type": "complaint", "status": "resolved", "opened_at": "2026-09-20", "resolved_at": "2026-09-28"}]},
-  {"customer_id": "cust_002", "_note": "open complaint", "segment": "high_value", "region": "IT", "products": ["current_account"],
+  {"customer_id": "cust_002", "name": "Giulia Moretti", "_note": "open complaint", "segment": "high_value", "region": "IT", "products": ["current_account"],
    "cases": [{"case_id": "C-2001", "case_type": "complaint", "status": "open", "opened_at": "2026-10-01"}]},
-  {"customer_id": "cust_003", "_note": "vulnerable customer flag", "segment": "mass", "region": "ES", "products": ["current_account"],
+  {"customer_id": "cust_003", "name": "Marta Fernández", "_note": "vulnerable customer flag", "segment": "mass", "region": "ES", "products": ["current_account"],
    "flags": ["vulnerable_customer"]},
-  {"customer_id": "cust_004", "_note": "already holds top product", "segment": "high_value", "region": "FR", "products": ["current_account", "savings_plus"]},
-  {"customer_id": "cust_005", "_note": "top product not offered in PT", "segment": "high_value", "region": "PT", "products": ["current_account"]},
-  {"customer_id": "cust_006", "_note": "declined top product recently", "segment": "mass", "region": "IT", "products": ["current_account"]},
-  {"customer_id": "cust_007", "_note": "all scores below threshold", "segment": "mass", "region": "FR", "products": ["current_account"]},
-  {"customer_id": "cust_008", "_note": "new customer, no history", "segment": "mass", "region": "ES", "products": ["current_account"]},
-  {"customer_id": "cust_009", "_note": "deteriorating relationship, no open case", "segment": "high_value", "region": "ES", "products": ["current_account"]},
-  {"customer_id": "cust_010", "_note": "prompt injection inside an interaction summary", "segment": "high_value", "region": "ES", "products": ["current_account"]},
-  {"customer_id": "cust_011", "_note": "top product has no approved guidance", "segment": "high_value", "region": "ES", "products": ["current_account"]}
+  {"customer_id": "cust_004", "name": "Camille Dubois", "_note": "already holds top product", "segment": "high_value", "region": "FR", "products": ["current_account", "savings_plus"]},
+  {"customer_id": "cust_005", "name": "Rui Costa", "_note": "top product not offered in PT", "segment": "high_value", "region": "PT", "products": ["current_account"]},
+  {"customer_id": "cust_006", "name": "Luca Ferrari", "_note": "declined top product recently", "segment": "mass", "region": "IT", "products": ["current_account"]},
+  {"customer_id": "cust_007", "name": "Antoine Lefebvre", "_note": "all scores below threshold", "segment": "mass", "region": "FR", "products": ["current_account"]},
+  {"customer_id": "cust_008", "name": "Lucía Navarro", "_note": "new customer, no history", "segment": "mass", "region": "ES", "products": ["current_account"]},
+  {"customer_id": "cust_009", "name": "Javier Torres", "_note": "deteriorating relationship, no open case", "segment": "high_value", "region": "ES", "products": ["current_account"]},
+  {"customer_id": "cust_010", "name": "Elena Ruiz", "_note": "prompt injection inside an interaction summary", "segment": "high_value", "region": "ES", "products": ["current_account"]},
+  {"customer_id": "cust_011", "name": "Diego Morales", "_note": "top product has no approved guidance", "segment": "high_value", "region": "ES", "products": ["current_account"]}
 ]

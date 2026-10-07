@@ -11,6 +11,18 @@
   <h1>CCCP Workbench</h1>
   <span class="badge" id="mode-badge">checking mode&hellip;</span>
   <span class="badge">synthetic call data</span>
+  <div class="playback-bar" id="playback-bar" style="display:none">
+    <button class="pb-btn" id="pb-toggle" title="Pause/resume playback">&#10073;&#10073;</button>
+    <button class="pb-btn" id="pb-next" disabled title="Reveal the next step now">Next &#9654;</button>
+    <label class="pb-voice" title="Play synthesised voice in sync with the transcript"><input type="checkbox" id="pb-voice-toggle">&#128266;</label>
+    <select id="pb-speed" title="Playback speed">
+      <option value="2">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="0.667">1.5x</option>
+      <option value="0.5">2x</option>
+    </select>
+    <span class="pb-status" id="pb-status"></span>
+  </div>
   <nav class="view-switch">
     <button class="view-tab active" id="tab-agent" data-view="agent">Agent view</button>
     <button class="view-tab" id="tab-supervisor" data-view="supervisor">Supervisor view</button>
@@ -32,20 +44,14 @@
 
 <div class="agent-main">
 
-<div class="playback-bar" id="playback-bar" style="display:none">
-  <button class="pb-btn" id="pb-toggle">&#10073;&#10073; Pause</button>
-  <button class="pb-btn" id="pb-next" disabled>Next &#9654;</button>
-  <label class="pb-voice"><input type="checkbox" id="pb-voice-toggle">&#128266; Play voice</label>
-  <label class="pb-speed-label">Speed
-    <select id="pb-speed">
-      <option value="2">0.5x</option>
-      <option value="1" selected>1x</option>
-      <option value="0.667">1.5x</option>
-      <option value="0.5">2x</option>
-    </select>
-  </label>
-  <span class="pb-status" id="pb-status"></span>
-  <span class="pb-hint">Playback is paced for readability -- it does not reflect real backend latency. Real latency is still shown on each trace row once it reveals. With voice on, the customer's line paces to match how long it actually takes to say.</span>
+<!-- Who's on the call -- populated from call.started once a scenario runs. -->
+<div class="profile-bar" id="profile-bar">
+  <span class="profile-avatar" id="profile-avatar">&ndash;</span>
+  <div class="profile-text">
+    <div class="profile-name" id="profile-name">No active call</div>
+    <div class="profile-meta" id="profile-meta">Run a scenario to see who you're talking to.</div>
+  </div>
+  <div class="profile-chips" id="profile-chips"></div>
 </div>
 
 <!-- Business-facing summary: what happened and why, in plain language -->
@@ -56,7 +62,7 @@
 </section>
 
 <div class="split">
-  <!-- Call transcript, with the real recognized text when voice/STT is in the loop -->
+  <!-- Call transcript -->
   <section class="panel">
     <h2>Call transcript</h2>
     <div id="transcript"><span class="empty">Run a call to see it here.</span></div>
@@ -67,11 +73,14 @@
     </div>
   </section>
 
-  <!-- Engineering-facing pipeline trace: every stage this call actually went through -->
+  <!-- Engineering-facing pipeline trace: what's happening right now, in full,
+       plus a compact scrolling strip of every node that's run so far. -->
   <section class="panel">
-    <h2>Pipeline trace <span class="hint">what ran, which system, how long, why it's there</span></h2>
-    <div class="trace-current idle" id="trace-current"><span class="trace-current-dot"></span><span id="trace-current-text">Not running</span></div>
-    <div id="trace"><span class="empty">Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on.</span></div>
+    <h2>Pipeline trace <span class="hint">what's happening right now, and where it sits in the chain</span></h2>
+    <div id="trace-now" class="trace-now idle">
+      <div class="trace-now-empty">Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on.</div>
+    </div>
+    <div id="trace-timeline" class="trace-timeline"><span class="empty">No steps yet.</span></div>
   </section>
 </div>
 
