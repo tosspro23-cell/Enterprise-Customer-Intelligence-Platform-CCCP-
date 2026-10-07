@@ -46,6 +46,13 @@ param containerAppsEnvironmentId string = ''
 @description('Container image for both Container Apps (built by .github/workflows/build-push-ghcr.yml).')
 param containerImage string = 'ghcr.io/tosspro23-cell/cccp-workbench:latest'
 
+@description('Shared token required to start a live (paid) run on the public Workbench UI. Share the demo link as https://<fqdn>/?token=<value>. Empty = live runs disabled (the UI still loads; runs return 503).')
+@secure()
+param workbenchDemoToken string = ''
+
+@description('Real-time narrator deadline in seconds for the public Workbench (the agent falls back to the template beyond it).')
+param narratorDeadlineSeconds string = '3.0'
+
 var names = {
   openai: '${baseName}-openai'
   eventHubNamespace: '${baseName}-eh'
@@ -111,9 +118,14 @@ resource eventHub 'Microsoft.EventHub/namespaces/eventhubs@2024-01-01' = {
   }
 }
 
-resource eventHubAuthRule 'Microsoft.EventHub/namespaces/AuthorizationRules@2024-01-01' existing = {
-  parent: eventHubNamespace
-  name: 'RootManageSharedAccessKey'
+// Send-only, scoped to the one hub: the apps only publish. (Previously the
+// namespace-wide RootManageSharedAccessKey, which also grants Manage/Listen.)
+resource eventHubSendRule 'Microsoft.EventHub/namespaces/eventhubs/authorizationRules@2024-01-01' = {
+  parent: eventHub
+  name: 'cccp-send'
+  properties: {
+    rights: ['Send']
+  }
 }
 
 // ---------------------------------------------------------------- AI Search
@@ -180,27 +192,25 @@ resource language 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
 // ---------------------------------------------------------------- Container Apps
 // Both apps share one image; which server.py variant runs is just the
 // start command -- see README.md "Two Container Apps now run...".
-var sharedSecrets = [
+//
+// Each app gets only the secrets it uses. The AI Search key is a QUERY key
+// (read-only): the apps only search; `search_guidance.py ingest` is run by
+// an operator with the admin key from their own shell, never from an app.
+var coreSecrets = [
   { name: 'azure-openai-endpoint', value: openAi.properties.endpoint }
-  { name: 'azure-openai-deployment', value: narratorReasoning.name }
   { name: 'azure-openai-api-key', value: openAi.listKeys().key1 }
   { name: 'azure-openai-api-version', value: '2024-10-21' }
-  { name: 'eventhub-connection-string', value: eventHubAuthRule.listKeys().primaryConnectionString }
+  { name: 'eventhub-connection-string', value: eventHubSendRule.listKeys().primaryConnectionString }
   { name: 'eventhub-name', value: eventHub.name }
   { name: 'azure-search-endpoint', value: 'https://${search.name}.search.windows.net' }
-  { name: 'azure-search-api-key', value: search.listAdminKeys().primaryKey }
+  { name: 'azure-search-api-key', value: search.listQueryKeys().value[0].key }
   { name: 'azure-search-index', value: 'guidance' }
   { name: 'redis-host', value: redis.properties.hostName }
   { name: 'redis-port', value: '10000' }
   { name: 'redis-password', value: redisDatabase.listKeys().primaryKey }
-  { name: 'azure-speech-key', value: speech.listKeys().key1 }
-  { name: 'azure-speech-region', value: regionPrimary }
-  { name: 'azure-language-endpoint', value: language.properties.endpoint }
-  { name: 'azure-language-key', value: language.listKeys().key1 }
 ]
-var sharedEnvVars = [
+var coreEnvVars = [
   { name: 'AZURE_OPENAI_ENDPOINT', secretRef: 'azure-openai-endpoint' }
-  { name: 'AZURE_OPENAI_DEPLOYMENT', secretRef: 'azure-openai-deployment' }
   { name: 'AZURE_OPENAI_API_KEY', secretRef: 'azure-openai-api-key' }
   { name: 'AZURE_OPENAI_API_VERSION', secretRef: 'azure-openai-api-version' }
   { name: 'EVENTHUB_CONNECTION_STRING', secretRef: 'eventhub-connection-string' }
@@ -211,13 +221,38 @@ var sharedEnvVars = [
   { name: 'REDIS_HOST', secretRef: 'redis-host' }
   { name: 'REDIS_PORT', secretRef: 'redis-port' }
   { name: 'REDIS_PASSWORD', secretRef: 'redis-password' }
-  // Used by cccp-workbench-ui (the voice pipeline) and harmless-but-unused on
-  // cccp-workbench-app (the headless load-test runner never calls Speech/Language).
+]
+
+// Headless load-test runner: measures the reasoning deployment, as the
+// committed load-test reports did.
+var headlessSecrets = concat(coreSecrets, [
+  { name: 'azure-openai-deployment', value: narratorReasoning.name }
+])
+var headlessEnvVars = concat(coreEnvVars, [
+  { name: 'AZURE_OPENAI_DEPLOYMENT', secretRef: 'azure-openai-deployment' }
+])
+
+// Public Workbench: the real-time profile (non-reasoning deployment + a
+// real-time deadline), voice services, and the demo token gating live runs.
+var uiSecrets = concat(coreSecrets, [
+  { name: 'azure-openai-deployment', value: narratorRealtime.name }
+  { name: 'azure-speech-key', value: speech.listKeys().key1 }
+  { name: 'azure-speech-region', value: regionPrimary }
+  { name: 'azure-language-endpoint', value: language.properties.endpoint }
+  { name: 'azure-language-key', value: language.listKeys().key1 }
+], empty(workbenchDemoToken) ? [] : [
+  { name: 'workbench-demo-token', value: workbenchDemoToken }
+])
+var uiEnvVars = concat(coreEnvVars, [
+  { name: 'AZURE_OPENAI_DEPLOYMENT_REALTIME', secretRef: 'azure-openai-deployment' }
+  { name: 'NARRATOR_DEADLINE_S', value: narratorDeadlineSeconds }
   { name: 'AZURE_SPEECH_KEY', secretRef: 'azure-speech-key' }
   { name: 'AZURE_SPEECH_REGION', secretRef: 'azure-speech-region' }
   { name: 'AZURE_LANGUAGE_ENDPOINT', secretRef: 'azure-language-endpoint' }
   { name: 'AZURE_LANGUAGE_KEY', secretRef: 'azure-language-key' }
-]
+], empty(workbenchDemoToken) ? [] : [
+  { name: 'WORKBENCH_DEMO_TOKEN', secretRef: 'workbench-demo-token' }
+])
 
 resource appHeadless 'Microsoft.App/containerApps@2024-03-01' = if (!empty(containerAppsEnvironmentId)) {
   name: names.appHeadless
@@ -225,8 +260,10 @@ resource appHeadless 'Microsoft.App/containerApps@2024-03-01' = if (!empty(conta
   properties: {
     environmentId: containerAppsEnvironmentId
     configuration: {
-      ingress: { external: true, targetPort: 8080 }
-      secrets: sharedSecrets
+      // Internal only: /loadtest spends paid calls and has no auth of its own.
+      // Trigger it from inside the environment (e.g. `az containerapp exec`).
+      ingress: { external: false, targetPort: 8080 }
+      secrets: headlessSecrets
     }
     template: {
       containers: [
@@ -234,7 +271,7 @@ resource appHeadless 'Microsoft.App/containerApps@2024-03-01' = if (!empty(conta
           name: 'cccp-workbench'
           image: containerImage
           resources: { cpu: json('0.5'), memory: '1.0Gi' }
-          env: sharedEnvVars
+          env: headlessEnvVars
           // default CMD in the Dockerfile: apps/api/cloud_server.py (headless load-test trigger)
         }
       ]
@@ -250,7 +287,7 @@ resource appUi 'Microsoft.App/containerApps@2024-03-01' = if (!empty(containerAp
     environmentId: containerAppsEnvironmentId
     configuration: {
       ingress: { external: true, targetPort: 8080 }
-      secrets: sharedSecrets
+      secrets: uiSecrets
     }
     template: {
       containers: [
@@ -260,7 +297,7 @@ resource appUi 'Microsoft.App/containerApps@2024-03-01' = if (!empty(containerAp
           command: ['python3']
           args: ['apps/api/cloud_workbench_server.py']
           resources: { cpu: json('0.5'), memory: '1.0Gi' }
-          env: sharedEnvVars
+          env: uiEnvVars
         }
       ]
       scale: { minReplicas: 0, maxReplicas: 1 }

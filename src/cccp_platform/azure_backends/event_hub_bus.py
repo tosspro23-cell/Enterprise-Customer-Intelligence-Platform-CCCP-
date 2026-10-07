@@ -31,9 +31,10 @@ class PublishResult:
 
 class EventHubSink:
     """A sink compatible with `cccp_platform.events.EventSequencer`: call it
-    with each `Event` as it's produced. Batches per flush for throughput,
-    but under load-test usage we flush per call so publish latency is
-    measurable per event.
+    with each `Event` as it's produced. Sends one single-event batch per call
+    so publish latency is measurable per event -- a latency-measurement
+    pattern, NOT the throughput pattern (production would accumulate events
+    into batches per partition key and send on size/time thresholds).
     """
 
     def __init__(self) -> None:

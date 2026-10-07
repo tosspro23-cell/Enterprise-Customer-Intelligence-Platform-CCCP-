@@ -5,7 +5,13 @@ exact same interface (`search_commercial_guidance`), so
 `CommercialDecisionAgent` runs unmodified against a real managed search
 service instead of an in-process list scan. `ingest()` is a one-time setup
 step: create the index schema, then upload the synthetic guidance fixtures
-as documents.
+as documents. Ingest needs an ADMIN key (run it from an operator shell); the
+deployed apps are given a read-only QUERY key and only search.
+
+What this validates: connectivity and latency of a managed search service
+on the hot path. It is used as a filtered document store (`search_text="*"`,
+exact product/situation filter, no ranking), so it says nothing about
+retrieval quality; effective dates are enforced by the agent itself.
 """
 from __future__ import annotations
 
@@ -33,6 +39,12 @@ def _endpoint() -> str:
 
 def _index_name() -> str:
     return os.environ.get("AZURE_SEARCH_INDEX", "guidance")
+
+
+def _odata_literal(value: str) -> str:
+    """Quote a string for an OData filter (single quotes doubled), so a value
+    can never close the literal and extend the filter expression."""
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _credential() -> AzureKeyCredential:
@@ -85,8 +97,8 @@ class AzureSearchGuidanceIndex:
         try:
             results = self._client.search(
                 search_text="*",
-                filter=f"product_ids/any(p: p eq '{product_id}') and "
-                       f"(situation eq '{situation}' or situation eq 'any')",
+                filter=f"product_ids/any(p: p eq {_odata_literal(product_id)}) and "
+                       f"(situation eq {_odata_literal(situation)} or situation eq 'any')",
                 select=["document_id", "version", "section", "effective_date", "product_ids", "situation",
                         "text", "prohibited_phrases", "source_url"],
             )

@@ -7,7 +7,10 @@ narrator outputs -- the thing that actually matters for a decision system.
 Usage:
   python evals/run_evals.py                  # deterministic StubNarrator (CI gate)
   python evals/run_evals.py --narrator azure  # real Azure OpenAI; fault-injection cases are skipped
-  python evals/run_evals.py --out evals/report
+  python evals/run_evals.py --out evals/report  # refresh the committed snapshot (release only)
+Reports go to var/eval-report/ (untracked) by default: latency fields change
+on every run, so the committed evals/report/ files are snapshots, updated
+deliberately rather than dirtied by every local run.
 Exit code 1 if any critical case fails (promotion gate).
 """
 from __future__ import annotations
@@ -161,7 +164,7 @@ def main() -> int:
                           "(2.5s matches the real-time profile's SLA; a slower deployment needs a larger value "
                           "to be evaluated on output quality rather than on whether it meets that SLA)")
     ap.add_argument("--cases", default=str(ROOT / "evals" / "cases.json"))
-    ap.add_argument("--out", default=str(ROOT / "evals" / "report"))
+    ap.add_argument("--out", default=str(ROOT / "var" / "eval-report"))
     a = ap.parse_args()
     suite = json.loads(Path(a.cases).read_text())
     estate, as_of = SyntheticEstate(), date.fromisoformat(suite["as_of"])

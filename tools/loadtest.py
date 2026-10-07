@@ -1,7 +1,11 @@
-"""Load test: runs the scripted golden call concurrently against the real
-Azure backends (Event Hubs, Azure Managed Redis, Azure AI Search, Azure
-OpenAI) at increasing concurrency, and reports latency percentiles per
-stage plus the error rate.
+"""Concurrency smoke test: runs the scripted golden call concurrently against
+the real Azure backends (Event Hubs, Azure Managed Redis, Azure AI Search,
+Azure OpenAI) at a few concurrency levels, and reports per-stage latency plus
+the error rate. At the default 6 calls per level this is a smoke test, not a
+load test: it shows the stack works concurrently, not how it scales.
+
+Statistics: min/median/max always; p95/p99 only when a stage has at least
+MIN_N_FOR_TAIL samples -- with fewer, a "p95" is just the maximum.
 
 This measures the managed services' real behaviour under concurrent load,
 not the local Workbench server (stdlib http.server was never meant to be
@@ -15,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,14 +40,21 @@ AS_OF = date(2026, 10, 5)
 SCRIPT_PATH = ROOT / "data" / "calls" / "golden_savings.json"
 
 
+MIN_N_FOR_TAIL = 30
+
+
 def _percentiles(xs: list[float]) -> dict[str, float | None]:
+    """Seconds in, milliseconds out. Tail percentiles are None below MIN_N_FOR_TAIL samples."""
     if not xs:
-        return {"p50": None, "p95": None, "p99": None, "max": None, "n": 0}
+        return {"n": 0, "min": None, "p50": None, "max": None, "p95": None, "p99": None}
     xs = sorted(xs)
+
     def pct(p: float) -> float:
         k = min(len(xs) - 1, int(round(p * (len(xs) - 1))))
-        return round(xs[k] * 1000, 1)  # ms
-    return {"p50": pct(0.50), "p95": pct(0.95), "p99": pct(0.99), "max": round(max(xs) * 1000, 1), "n": len(xs)}
+        return round(xs[k] * 1000, 1)
+    tail = len(xs) >= MIN_N_FOR_TAIL
+    return {"n": len(xs), "min": round(xs[0] * 1000, 1), "p50": round(statistics.median(xs) * 1000, 1), "max": round(xs[-1] * 1000, 1),
+            "p95": pct(0.95) if tail else None, "p99": pct(0.99) if tail else None}
 
 
 def _one_call(estate: SyntheticEstate, narrator_timeout_s: float, run_idx: int) -> dict:
@@ -115,7 +127,8 @@ def main() -> int:
     ap.add_argument("--calls-per-level", type=int, default=6)
     ap.add_argument("--narrator-timeout", type=float, default=20.0,
                      help="generous by default so load-test results reflect real latency, not a timeout cutoff")
-    ap.add_argument("--out", default=str(ROOT / "evals" / "report" / "loadtest_report.json"))
+    ap.add_argument("--out", default=str(ROOT / "var" / "loadtest_report.json"),
+                    help="untracked by default; copy into evals/report/ deliberately to publish a run")
     a = ap.parse_args()
 
     estate = SyntheticEstate()
