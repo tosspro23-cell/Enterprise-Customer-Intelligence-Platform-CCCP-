@@ -81,6 +81,18 @@ class RedisCallState:
             return self._r.lrange(key, 0, -1)
         return self._timed(_do)
 
+    def read_live_signal(self) -> tuple[float | None, list[str]]:
+        """Rolling sentiment + active themes in one timed round trip -- the read
+        that builds each LiveCallSignal, so it is counted in the measured Redis
+        latency like every write is."""
+        def _do():
+            pipe = self._r.pipeline()
+            pipe.hget(self._key, "current_sentiment")
+            pipe.lrange(f"{self._key}:themes", 0, -1)
+            raw, themes = pipe.execute()
+            return (float(raw) if raw is not None else None), list(themes)
+        return self._timed(_do)
+
     @property
     def current_sentiment(self) -> float | None:
         raw = self._r.hget(self._key, "current_sentiment")

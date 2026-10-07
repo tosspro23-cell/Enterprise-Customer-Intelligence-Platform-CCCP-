@@ -299,7 +299,7 @@ function renderNowCard(instanceId) {
         <div class="now-label">${meta.label}<span class="now-system">${meta.system}</span></div>
         <div class="now-business">${meta.business}</div>
       </div>
-      <span class="now-status status-${rec.status}">${rec.status}</span>
+      <span class="now-status status-${rec.status}" title="${rec.replayed ? "Replayed from the agent trace after the decision completed; durations are real" : ""}">${rec.status}${rec.replayed ? " · replayed from trace" : ""}</span>
       <span class="now-ms">${ms !== null ? ms.toFixed(0) + " ms" : ""}</span>
     </div>
     <div class="now-bar-track"><div class="now-bar-fill" style="width:${ms !== null ? Math.min(100, Math.round((ms / TRACE_SCALE_MS) * 100)) : 0}%"></div></div>
@@ -355,7 +355,8 @@ function handleStage(p) {
     chip.className = chip.className.replace(/status-\S+/, "status-running");
   } else if (p.status === "done") {
     stageRecords[p.instance_id] = { stage: p.stage, status: "done", ms: p.ms, detail: p.detail,
-                                     ehMs: p._eh_publish_ms, audioB64: stageRecords[p.instance_id]?.audioB64 };
+                                     ehMs: p._eh_publish_ms, audioB64: stageRecords[p.instance_id]?.audioB64,
+                                     replayed: !!p.replayed };
     chip.className = chip.className.replace(/status-\S+/, "status-done");
   } else if (p.status === "error") {
     stageRecords[p.instance_id] = { stage: p.stage, status: "error", detail: p.detail };
@@ -501,6 +502,28 @@ pbNextEl.addEventListener("click", () => {
   revealNext();
 });
 
+// Live (Azure) runs need the shared demo token: it arrives once in the link
+// (?token=...), is kept for this tab only, and goes out as a header.
+function demoToken() {
+  const fromUrl = new URLSearchParams(location.search).get("token");
+  try {
+    if (fromUrl) sessionStorage.setItem("cccpDemoToken", fromUrl);
+    return fromUrl || sessionStorage.getItem("cccpDemoToken") || "";
+  } catch {
+    return fromUrl || "";
+  }
+}
+
+function showRunRefused(message) {
+  hideTypingIndicator();
+  playbackBarEl.style.display = "none";
+  statusAreaEl.innerHTML = "";
+  const banner = document.createElement("div");
+  banner.className = "status-banner status-unavailable";
+  banner.textContent = message;
+  statusAreaEl.appendChild(banner);
+}
+
 async function runScript(scriptId, buttons, activeCard) {
   buttons.forEach((b) => (b.disabled = true));
   if (activeCard) activeCard.classList.add("running");
@@ -515,8 +538,13 @@ async function runScript(scriptId, buttons, activeCard) {
   showTypingIndicator();
   const revealed = new Promise((resolve) => { onFullyRevealed = resolve; });
   try {
-    const runResp = await fetch(`/api/run/${scriptId}`, { method: "POST" });
-    const { call_id } = await runResp.json();
+    const runResp = await fetch(`/api/run/${scriptId}`, { method: "POST", headers: { "X-Demo-Token": demoToken() } });
+    const runBody = await runResp.json().catch(() => ({}));
+    if (!runResp.ok) {
+      showRunRefused(runBody.error || `run refused (HTTP ${runResp.status})`);
+      return;
+    }
+    const { call_id } = runBody;
     const streamResp = await fetch(`/api/calls/${call_id}/stream`);
     const reader = streamResp.body.getReader();
     const decoder = new TextDecoder();
@@ -691,7 +719,8 @@ async function loadMode() {
     const resp = await fetch("/api/mode");
     const data = await resp.json();
     if (data.mode === "azure-live") {
-      modeBadgeEl.textContent = "LIVE AZURE -- real Speech/Language/Event Hubs/Redis/AI Search/OpenAI";
+      const narrator = data.narrator_deployment ? ` · narrator ${data.narrator_deployment}, ${data.narrator_deadline_s}s deadline` : "";
+      modeBadgeEl.textContent = `LIVE AZURE -- real Speech/Language/Event Hubs/Redis/AI Search/OpenAI${narrator}`;
       modeBadgeEl.style.background = "color-mix(in srgb, var(--ok) 20%, transparent)";
       modeBadgeEl.style.color = "var(--ok)";
     } else {

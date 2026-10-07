@@ -28,7 +28,10 @@ start command, not a separate image.
 from __future__ import annotations
 
 import base64
+import collections
+import hmac
 import json
+import os
 import queue
 import re
 import sys
@@ -62,6 +65,7 @@ from cccp_platform.events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, Event
                                    SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
 from cccp_platform.postcall import build_enrichment
 from cccp_platform.store import AnalyticalStore
+from cccp_platform.text_metrics import word_error_rate
 
 WEB_DIR = ROOT / "apps" / "web"
 CALLS_DIR = ROOT / "data" / "calls"
@@ -79,17 +83,62 @@ PORT = 8080
 _GATE_SPANS = {"get_customer", "get_interactions", "analyse", "customer_gates"}
 _SPAN_TO_STAGE = {"score_products": "ml", "search_guidance": "search", "narrator_explain": "narrator"}
 
+# Real-time profile: the non-reasoning deployment and a real-time deadline,
+# not the reasoning model with a 20s timeout (README: "Validated against a
+# live Azure OpenAI endpoint"). A deadline miss shows the template fallback --
+# that is the design, not a failure.
+NARRATOR_DEPLOYMENT = os.environ.get("AZURE_OPENAI_DEPLOYMENT_REALTIME") or os.environ.get("AZURE_OPENAI_DEPLOYMENT", "")
+NARRATOR_DEADLINE_S = float(os.environ.get("NARRATOR_DEADLINE_S", "3.0"))
+
+# Every run spends paid cloud calls on every turn and this server is public,
+# so runs are gated: a shared demo token (fail closed when unset), at most
+# MAX_CONCURRENT_RUNS at once, and a per-client cap per rolling window.
+DEMO_TOKEN = os.environ.get("WORKBENCH_DEMO_TOKEN", "")
+MAX_CONCURRENT_RUNS = int(os.environ.get("WORKBENCH_MAX_CONCURRENT_RUNS", "2"))
+RUNS_PER_CLIENT = int(os.environ.get("WORKBENCH_RUNS_PER_CLIENT", "6"))
+RUN_WINDOW_S = 15 * 60
+QUEUE_TTL_S = 10 * 60   # a stream nobody reads is dropped after this
+
 estate = SyntheticEstate()
 store = AnalyticalStore(DB_DIR / "workbench_cloud.db")
 SCRIPTS = {f.stem: json.loads(f.read_text()) for f in sorted(CALLS_DIR.glob("*.json"))}
-call_queues: dict[str, "queue.Queue"] = {}
+call_queues: dict[str, tuple["queue.Queue", float]] = {}
+_run_slots = threading.BoundedSemaphore(MAX_CONCURRENT_RUNS)
+_client_runs: dict[str, collections.deque] = collections.defaultdict(collections.deque)
+_limits_lock = threading.Lock()
+
+
+def _reap_stale_queues(now: float) -> None:
+    for run_id, (_, created) in list(call_queues.items()):
+        if now - created > QUEUE_TTL_S:
+            call_queues.pop(run_id, None)
+
+
+def _admit_run(client: str, token: str) -> tuple[int, str] | None:
+    """None if the run may start (a run slot is then held), else (status, reason)."""
+    if not DEMO_TOKEN:
+        return 503, "live runs are disabled: WORKBENCH_DEMO_TOKEN is not configured on the server"
+    if not hmac.compare_digest(token.encode(), DEMO_TOKEN.encode()):
+        return 401, "a valid demo token is required to start a live run (open the demo link that includes ?token=...)"
+    now = time.time()
+    with _limits_lock:
+        _reap_stale_queues(now)
+        hits = _client_runs[client]
+        while hits and now - hits[0] > RUN_WINDOW_S:
+            hits.popleft()
+        if len(hits) >= RUNS_PER_CLIENT:
+            return 429, f"run limit reached ({RUNS_PER_CLIENT} per {RUN_WINDOW_S // 60} min); try again later"
+        if not _run_slots.acquire(blocking=False):
+            return 429, f"{MAX_CONCURRENT_RUNS} live runs already in progress; try again in a minute"
+        hits.append(now)
+    return None
 
 
 def start_call(script_id: str) -> str:
     script = SCRIPTS[script_id]
     run_id = f"{script['call_id']}_{uuid.uuid4().hex[:6]}"
     q: queue.Queue = queue.Queue()
-    call_queues[run_id] = q
+    call_queues[run_id] = (q, time.time())
     events_log: list[dict] = []  # replayed later from the Supervisor view
 
     def to_browser(d: dict) -> None:
@@ -130,9 +179,11 @@ def start_call(script_id: str) -> str:
             seq = EventSequencer(run_id, script["customer_id"], trace_id, "cloud-workbench-voice", dual_sink)
             state = RedisCallState(run_id, script["customer_id"], script["agent_id"])
             agent = CommercialDecisionAgent(estate.customer_port(), estate.interaction_port(), estate.model_port(),
-                                             AzureSearchGuidanceIndex(), estate.catalog, AzureOpenAINarrator(),
-                                             narrator_timeout_s=20.0)
+                                             AzureSearchGuidanceIndex(), estate.catalog,
+                                             AzureOpenAINarrator(deployment=NARRATOR_DEPLOYMENT),
+                                             narrator_timeout_s=NARRATOR_DEADLINE_S)
             decisions = []
+            wers: list[float] = []
 
             customer_record = estate.customer_port().get_customer(script["customer_id"])
             seq.emit(CALL_STARTED, {
@@ -171,9 +222,13 @@ def start_call(script_id: str) -> str:
                 t0 = time.perf_counter()
                 stt_result = speech_transcribe(audio)
                 stt_s = time.perf_counter() - t0
+                wer = word_error_rate(turn["text"], stt_result.recognized_text)
+                if wer is not None:
+                    wers.append(wer)
                 stage_done("stt", iid, (tts_s + stt_s) * 1000, {"original": turn["text"],
                                                                  "recognized": stt_result.recognized_text or
                                                                  "(nothing recognised -- script text used downstream)",
+                                                                 "word_error_rate": wer, "stt_reason": stt_result.reason,
                                                                  "tts_s": round(tts_s, 2), "stt_s": round(stt_s, 2)})
                 # Audio is browser-only, never published to Event Hubs -- domain events
                 # carry facts about a call, never raw audio (docs/architecture.md §8.1).
@@ -181,10 +236,12 @@ def start_call(script_id: str) -> str:
                                                 "audio_base64": base64.b64encode(audio).decode("ascii")})
                 # Empty recognition falls back to the script text so the call can go on,
                 # but the fallback is recorded -- the trace must not imply STT produced it.
+                # `text` is what STT actually heard (what a real pipeline would have);
+                # the scripted line is kept as `reference_text` for WER.
                 stt_fallback = not stt_result.recognized_text
                 recognized = stt_result.recognized_text or turn["text"]
-                seq.emit(UTTERANCE_FINAL, {"channel": "customer", "text": turn["text"],
-                                            "_stt": {"recognized_text": recognized, "fallback_to_script": stt_fallback}})
+                seq.emit(UTTERANCE_FINAL, {"channel": "customer", "text": recognized, "reference_text": turn["text"],
+                                            "_stt": {"word_error_rate": wer, "fallback_to_script": stt_fallback}})
 
                 # --- real sentiment ---
                 iid = stage_start("sentiment")
@@ -223,7 +280,8 @@ def start_call(script_id: str) -> str:
 
                 # --- the real decision: policy gate -> ML score -> guidance -> narrator ---
                 browser_put("pipeline.group", {"kind": "decision", "label": "Commercial decision triggered"})
-                live = LiveCallSignal(run_id, state.current_sentiment or 0.0, tuple(state.active_themes))
+                sentiment_now, themes_now = state.read_live_signal()
+                live = LiveCallSignal(run_id, sentiment_now or 0.0, tuple(themes_now))
                 result = agent.run(DecisionRequest(script["customer_id"], AS_OF, call_id=run_id, live_signal=live))
                 decisions.append(result)
                 state.set_commercial_state(result.outcome.value)
@@ -241,10 +299,13 @@ def start_call(script_id: str) -> str:
                     evidence_by_kind.setdefault(e.kind, []).append(e)
 
                 def emit_decision_stage(stage: str, ms: float, detail: dict | None = None) -> None:
+                    # Replayed from the agent's own trace after run() returned -- the
+                    # durations are real, the running->done reveal is not live.
                     iid = stage_start(stage)
-                    clean = {k: v for k, v in (detail or {}).items() if v} or None
+                    clean = {k: v for k, v in (detail or {}).items() if v} or {}
+                    clean["timing_source"] = ["replayed from the agent trace after the decision (real durations)"]
                     seq.emit("pipeline.stage", {"stage": stage, "status": "done", "instance_id": iid,
-                                                 "ms": round(ms, 1), **({"detail": clean} if clean else {})})
+                                                 "ms": round(ms, 1), "replayed": True, "detail": clean})
 
                 gate_ms = sum(s["duration_ms"] for s in result.spans if s["name"] in _GATE_SPANS)
                 emit_decision_stage("gate", gate_ms, {
@@ -266,8 +327,16 @@ def start_call(script_id: str) -> str:
                                    if hits else ["no approved guidance matched -- no recommendation will cite one"]}
                     elif stage_key == "narrator":
                         llm_ev = evidence_by_kind.get("llm")
-                        if llm_ev:
-                            detail = {"prompt_profile": llm_ev[0].source_id, "validation": llm_ev[0].detail}
+                        exceeded = s.get("deadline_exceeded")
+                        detail = {
+                            "narrator_call": [
+                                f"deployment: {s.get('deployment', NARRATOR_DEPLOYMENT)}",
+                                f"deadline: {s.get('deadline_s', NARRATOR_DEADLINE_S)}s, attempts: {s.get('attempts', 1)}",
+                                "deadline exceeded -> deterministic template shown (by design)" if exceeded
+                                else f"explanation by: {result.explanation.generated_by}",
+                            ],
+                            "validation": [llm_ev[0].detail] if llm_ev else None,
+                        }
                     emit_decision_stage(stage_key, s["duration_ms"], detail)
                 emit_decision_stage("evidence", 0, {
                     "evidence_collected": [f"{k} ×{len(v)}" for k, v in evidence_by_kind.items()],
@@ -289,7 +358,8 @@ def start_call(script_id: str) -> str:
                     })
 
             state.end()
-            seq.emit(CALL_ENDED, {})
+            seq.emit(CALL_ENDED, {"stt_mean_word_error_rate": round(sum(wers) / len(wers), 3) if wers else None,
+                                  "stt_turns": len(wers)})
             rec = build_enrichment(_StateAdapter(state, run_id, script, trace_id), decisions)
             store.insert_call(rec, scenario_id=script_id)
             browser_put("postcall.enrichment_completed",
@@ -304,6 +374,7 @@ def start_call(script_id: str) -> str:
             browser_put("pipeline.error", {"error": f"{type(e).__name__}: {e}"})
             store.save_events(run_id, events_log)  # partial trace is still worth keeping for review
         finally:
+            _run_slots.release()
             q.put(None)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -347,9 +418,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _stream(self, call_id: str) -> None:
-        q = call_queues.get(call_id)
-        if q is None:
+        entry = call_queues.get(call_id)
+        if entry is None:
             return self._json(404, {"error": "unknown call_id"})
+        q = entry[0]
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.send_header("Cache-Control", "no-cache")
@@ -378,7 +450,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/healthz":
             return self._json(200, {"status": "ok"})
         if path == "/api/mode":
-            return self._json(200, {"mode": "azure-live"})
+            return self._json(200, {"mode": "azure-live", "run_requires_token": True,
+                                     "narrator_deployment": NARRATOR_DEPLOYMENT,
+                                     "narrator_deadline_s": NARRATOR_DEADLINE_S})
         if path == "/api/scripts":
             return self._json(200, [{"id": k, "title": v.get("title", k), "customer_id": v.get("customer_id")}
                                      for k, v in SCRIPTS.items()])
@@ -413,7 +487,14 @@ class Handler(BaseHTTPRequestHandler):
             script_id = m.group(1)
             if script_id not in SCRIPTS:
                 return self._json(404, {"error": "unknown script"})
-            return self._json(202, {"call_id": start_call(script_id)})
+            denied = _admit_run(self._client_id(), self.headers.get("X-Demo-Token", ""))
+            if denied:
+                return self._json(denied[0], {"error": denied[1]})
+            try:
+                return self._json(202, {"call_id": start_call(script_id)})
+            except Exception:
+                _run_slots.release()  # the worker never started, so it can't release its slot
+                raise
 
         if path == "/api/assistant/ask":
             try:
@@ -424,6 +505,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"answer": ans.answer, "tool": ans.tool, "source": ans.source,
                                      "citations": list(ans.citations), "note": assistant_mod.ROUTER_NOTE})
         self.send_error(404)
+
+    def _client_id(self) -> str:
+        # Behind Container Apps ingress the peer is the proxy; the client is the
+        # first X-Forwarded-For hop.
+        fwd = self.headers.get("X-Forwarded-For", "")
+        return fwd.split(",")[0].strip() or self.client_address[0]
 
     def log_message(self, fmt: str, *args) -> None:
         pass

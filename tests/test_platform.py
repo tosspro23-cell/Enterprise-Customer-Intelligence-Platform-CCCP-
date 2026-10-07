@@ -175,5 +175,14 @@ class TestAssistant(unittest.TestCase):
         self.assertEqual(a.tool, "none")
 
 
+class TestTextMetrics(unittest.TestCase):
+    def test_word_error_rate(self):
+        from cccp_platform.text_metrics import word_error_rate
+        self.assertEqual(word_error_rate("I want to save money", "i want to save money."), 0.0)
+        self.assertEqual(word_error_rate("one two three four", "one three four five"), 0.5)  # 1 del + 1 ins
+        self.assertEqual(word_error_rate("hello there", ""), 1.0)
+        self.assertIsNone(word_error_rate("", "anything"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,9 @@ validated component.
 """
 from __future__ import annotations
 
+import functools
 import os
+import re
 
 from azure.ai.textanalytics import TextAnalyticsClient
 from azure.core.credentials import AzureKeyCredential
@@ -22,7 +24,10 @@ TAXONOMY = ("fees", "fraud_security", "card_issue", "digital_app", "cancellation
             "savings", "product_enquiry", "service_quality", "resolution")
 
 
+@functools.lru_cache(maxsize=1)
 def _client() -> TextAnalyticsClient:
+    # One client per process: a new client per call put connection setup
+    # into every measured sentiment latency.
     return TextAnalyticsClient(os.environ["AZURE_LANGUAGE_ENDPOINT"],
                                 AzureKeyCredential(os.environ["AZURE_LANGUAGE_KEY"]))
 
@@ -37,24 +42,20 @@ def analyse_sentiment(text: str) -> float:
     return round(scores.positive - scores.negative, 3)
 
 
+# Whole-word patterns (a prefix match where noted). Plain substring matching
+# tagged "feel" as fees and "happy"/"apply"/"appreciate" as digital_app.
+_THEME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple((t, re.compile(p, re.I)) for t, p in (
+    ("fees", r"\bfees?\b|\bcharges?\b"),
+    ("fraud_security", r"\bfraud\w*|\bsecurity\b|\bscams?\b"),
+    ("card_issue", r"\bcards?\b"),
+    ("digital_app", r"\bapps?\b|\bdigital\b|\bonline banking\b"),
+    ("cancellation", r"\bcancel\w*"),
+    ("resolution", r"\bcomplaints?\b|\bresolved?\b|\bresolution\b"),
+    ("savings", r"\bsav(?:e|es|ing|ings)\b|\bmoney aside\b"),
+    ("product_enquiry", r"\boffer\w*|\bproducts?\b"),
+))
+
+
 def tag_themes(text: str) -> list[str]:
-    """Keyword match against the controlled taxonomy -- NOT a trained classifier."""
-    low = text.lower()
-    hits = []
-    if "fee" in low:
-        hits.append("fees")
-    if "fraud" in low or "security" in low or "scam" in low:
-        hits.append("fraud_security")
-    if "card" in low:
-        hits.append("card_issue")
-    if "app" in low or "digital" in low:
-        hits.append("digital_app")
-    if "cancel" in low:
-        hits.append("cancellation")
-    if "complaint" in low or "resolve" in low or "resolution" in low:
-        hits.append("resolution")
-    if "saving" in low or "save" in low or "money aside" in low:
-        hits.append("savings")
-    if "offer" in low or "product" in low:
-        hits.append("product_enquiry")
-    return hits
+    """Whole-word keyword match against the controlled taxonomy -- NOT a trained classifier."""
+    return [theme for theme, pat in _THEME_PATTERNS if pat.search(text)]

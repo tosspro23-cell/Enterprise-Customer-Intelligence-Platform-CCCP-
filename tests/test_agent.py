@@ -185,5 +185,58 @@ class TestAgentEndToEnd(unittest.TestCase):
             self.assertIn("interaction_history_unavailable", r.degraded)
 
 
+class _SlowCompletions:
+    def __init__(self, delay_s, content='{"x": 1}'):
+        self.delay_s, self.content, self.calls = delay_s, content, 0
+
+    def create(self, **kw):
+        import time
+        from types import SimpleNamespace as NS
+        self.calls += 1
+        time.sleep(self.delay_s)
+        return NS(choices=[NS(message=NS(content=self.content))])
+
+
+class TestNarratorDeadline(unittest.TestCase):
+    """The narrator timeout is an end-to-end deadline: a slow provider can never hold the agent past it."""
+
+    def _narrator(self, delay_s):
+        from types import SimpleNamespace as NS
+        from cccp_agent.adapters.azure_openai import AzureOpenAINarrator
+        comp = _SlowCompletions(delay_s)
+        return AzureOpenAINarrator(deployment="fake-rt", client=NS(chat=NS(completions=comp))), comp
+
+    def test_slow_provider_falls_back_within_deadline(self):
+        import time
+        narrator, comp = self._narrator(delay_s=1.5)
+        e = SyntheticEstate()
+        agent = CommercialDecisionAgent(e.customer_port(), e.interaction_port(), e.model_port(), e.guidance_port(),
+                                        e.catalog, narrator, narrator_timeout_s=0.3)
+        t0 = time.perf_counter()
+        r = agent.run(DecisionRequest("cust_001", AS_OF))
+        elapsed = time.perf_counter() - t0
+        self.assertLess(elapsed, 0.3 + 0.1)
+        self.assertEqual((r.outcome, r.explanation.generated_by), (Outcome.RECOMMENDED, "template"))
+        self.assertIn("narrator_timeout", r.degraded)
+        span = next(s for s in r.spans if s["name"] == "narrator_explain")
+        self.assertEqual((span["deadline_exceeded"], span["attempts"], span["deployment"]), (True, 1, "fake-rt"))
+        self.assertEqual(comp.calls, 1)
+
+    def test_fast_provider_is_not_cut_off(self):
+        narrator, _ = self._narrator(delay_s=0.0)
+        self.assertEqual(narrator.generate_json("p", "s", {}, 1.0), {"x": 1})
+        self.assertFalse(narrator.last_call["deadline_exceeded"])
+
+    @unittest.skipUnless(__import__("importlib").util.find_spec("openai"), "openai SDK not installed")
+    def test_real_client_has_retries_disabled(self):
+        import os
+        from unittest import mock
+        from cccp_agent.adapters.azure_openai import AzureOpenAINarrator
+        env = {"AZURE_OPENAI_ENDPOINT": "https://example.invalid", "AZURE_OPENAI_API_KEY": "x",
+               "AZURE_OPENAI_DEPLOYMENT": "d"}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(AzureOpenAINarrator()._client.max_retries, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

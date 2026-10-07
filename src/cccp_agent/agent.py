@@ -191,8 +191,11 @@ class CommercialDecisionAgent:
             return template_explanation(product, score, trend, themes, guidance)
         payload = build_narrator_payload(product, score, trend, themes, guidance, situation)
         try:
-            with tr.span("narrator_explain", profile=PROMPT_PROFILE):
-                raw = self.narrator.generate_json(PROMPT_PROFILE, SYSTEM_PROMPT, payload, self.narrator_timeout_s)
+            with tr.span("narrator_explain", profile=PROMPT_PROFILE, deadline_s=self.narrator_timeout_s) as s:
+                try:
+                    raw = self.narrator.generate_json(PROMPT_PROFILE, SYSTEM_PROMPT, payload, self.narrator_timeout_s)
+                finally:  # adapter-reported call facts (deployment, attempts, deadline_exceeded), if any
+                    s.update(getattr(self.narrator, "last_call", None) or {})
         except DependencyError as e:
             degraded.append("narrator_timeout" if isinstance(e, DependencyTimeout) else "narrator_error")
             return template_explanation(product, score, trend, themes, guidance)

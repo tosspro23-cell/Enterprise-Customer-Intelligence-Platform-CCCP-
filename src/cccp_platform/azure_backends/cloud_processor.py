@@ -53,7 +53,8 @@ def run_call_cloud(
         if not turn.get("trigger"):
             continue
 
-        live = LiveCallSignal(call_id, state.current_sentiment or 0.0, tuple(state.active_themes))
+        sentiment_now, themes_now = state.read_live_signal()
+        live = LiveCallSignal(call_id, sentiment_now or 0.0, tuple(themes_now))
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
         decisions.append(result)
         state.set_commercial_state(result.outcome.value)
@@ -128,7 +129,8 @@ def run_call_cloud_voice(
 
         if not turn.get("trigger"):
             continue
-        live = LiveCallSignal(call_id, state.current_sentiment or 0.0, tuple(state.active_themes))
+        sentiment_now, themes_now = state.read_live_signal()
+        live = LiveCallSignal(call_id, sentiment_now or 0.0, tuple(themes_now))
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
         decisions.append(result)
         state.set_commercial_state(result.outcome.value)
