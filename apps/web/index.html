@@ -18,13 +18,25 @@
 </header>
 
 <!-- ============================== AGENT VIEW: what an agent sees live during one call ============================== -->
-<div id="view-agent">
+<div id="view-agent" class="agent-layout">
 
-<div class="scenario-wrap">
-  <h2 class="scenario-heading">Scenarios <span class="hint">11 synthetic customers, each exercising one rule or capability -- pick one to run</span></h2>
-  <div class="scenario-grid" id="controls">
+<!-- Compact, scrollable scenario list -- a grid of cards stopped scaling once
+     there were 11; a list scales to however many get added later without
+     eating the vertical space the transcript/trace actually need. -->
+<nav class="agent-sidebar">
+  <h2 class="sidebar-heading">Scenarios <span class="hint">pick one to run</span></h2>
+  <div class="scenario-list" id="controls">
     <span class="empty">Loading scenarios&hellip;</span>
   </div>
+</nav>
+
+<div class="agent-main">
+
+<div class="playback-bar" id="playback-bar" style="display:none">
+  <button class="pb-btn" id="pb-toggle">&#10073;&#10073; Pause</button>
+  <button class="pb-btn" id="pb-next" disabled>Next &#9654;</button>
+  <span class="pb-status" id="pb-status"></span>
+  <span class="pb-hint">Playback is paced for readability -- it does not reflect real backend latency. Real latency is still shown on each trace row once it reveals.</span>
 </div>
 
 <!-- Business-facing summary: what happened and why, in plain language -->
@@ -60,6 +72,7 @@
   </details>
 </div>
 
+</div>
 </div>
 
 <!-- ============================== SUPERVISOR VIEW: aggregate stats + drill into any past call ============================== -->

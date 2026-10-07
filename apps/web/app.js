@@ -10,6 +10,10 @@ const logEl = document.getElementById("log");
 const answerEl = document.getElementById("answer");
 const quickEl = document.getElementById("quick");
 const modeBadgeEl = document.getElementById("mode-badge");
+const playbackBarEl = document.getElementById("playback-bar");
+const pbToggleEl = document.getElementById("pb-toggle");
+const pbNextEl = document.getElementById("pb-next");
+const pbStatusEl = document.getElementById("pb-status");
 
 // What each pipeline stage is, which system backs it, and -- just as
 // important -- whether that system call is real (hits Azure) or a local
@@ -60,6 +64,7 @@ function logLine(evt) {
 let traceRowsById = {};
 
 function resetPanels() {
+  resetPlayback();
   clearChildren(transcriptEl);
   transcriptEl.appendChild(emptySpan("Run a call to see it here."));
   sentimentValueEl.textContent = "–";
@@ -75,7 +80,22 @@ function resetPanels() {
   traceRowsById = {};
 }
 
+function showTypingIndicator() {
+  if (transcriptEl.querySelector(".bubble.typing")) return;
+  if (transcriptEl.querySelector(".empty")) clearChildren(transcriptEl);
+  const b = document.createElement("div");
+  b.className = "bubble typing";
+  b.innerHTML = '<span class="ch">working</span><span class="dots"><span>&#9679;</span><span>&#9679;</span><span>&#9679;</span></span>';
+  transcriptEl.appendChild(b);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+function hideTypingIndicator() {
+  const b = transcriptEl.querySelector(".bubble.typing");
+  if (b) b.remove();
+}
+
 function appendBubble(channel, text, sttDetail) {
+  hideTypingIndicator();
   if (transcriptEl.querySelector(".empty")) clearChildren(transcriptEl);
   const b = document.createElement("div");
   b.className = `bubble ${channel}`;
@@ -226,10 +246,106 @@ function handleStage(p) {
   traceEl.scrollTop = traceEl.scrollHeight;
 }
 
+// -------------------------------------------------------------- paced reveal
+//
+// The backend streams events the instant they're real (an STT call might
+// take 6s, a narrator call 9s, a Redis round trip 500ms) -- piping that
+// straight into the UI makes the conversation feel like it's stuttering:
+// long dead air, then a burst, at a pace that tracks Azure's response time
+// instead of a human one. This decouples the two: the real backend still
+// runs (and still produces real timing, shown on each trace row once it
+// reveals), but what's actually DISPLAYED is drained from a queue at a
+// steady, human pace -- with a visible "still working" gap when the
+// backend is genuinely still going, instead of either freezing or lying
+// about how long something took.
+const PACE_MS = { "transcript.utterance_final": 1100, "pipeline.stage": 550 };
+const DEFAULT_PACE_MS = 450;
+
+let revealQueue = [];
+let revealTimer = null;
+let streamDone = false;
+let autoPlay = true;
+let onFullyRevealed = null;
+
+function resetPlayback() {
+  revealQueue = [];
+  streamDone = false;
+  autoPlay = true;
+  clearTimeout(revealTimer);
+  revealTimer = null;
+  onFullyRevealed = null;
+  hideTypingIndicator();
+  playbackBarEl.style.display = "none";
+  pbToggleEl.textContent = "⏸ Pause";
+  pbStatusEl.textContent = "";
+}
+
+function updatePlaybackStatus() {
+  pbNextEl.disabled = revealQueue.length === 0;
+  pbStatusEl.textContent = revealQueue.length
+    ? `${revealQueue.length} step${revealQueue.length > 1 ? "s" : ""} queued`
+    : streamDone ? "finished" : "backend still working…";
+}
+
+function enqueueEvent(evt) {
+  revealQueue.push(evt);
+  playbackBarEl.style.display = "flex";
+  updatePlaybackStatus();
+  if (autoPlay && !revealTimer) revealTimer = setTimeout(revealNext, 1);
+}
+
+function revealNext() {
+  revealTimer = null;
+  hideTypingIndicator();
+  const evt = revealQueue.shift();
+  if (evt) {
+    logLine(evt);
+    dispatch(evt);
+  }
+  updatePlaybackStatus();
+  if (!revealQueue.length && streamDone) {
+    onFullyRevealed?.();
+    return;
+  }
+  if (autoPlay) {
+    if (revealQueue.length) {
+      revealTimer = setTimeout(revealNext, PACE_MS[evt?.event_type] ?? DEFAULT_PACE_MS);
+    } else {
+      showTypingIndicator();  // backend's still going; say so instead of looking stuck
+    }
+  }
+}
+
+pbToggleEl.addEventListener("click", () => {
+  autoPlay = !autoPlay;
+  pbToggleEl.textContent = autoPlay ? "⏸ Pause" : "▶ Play";
+  if (autoPlay) {
+    hideTypingIndicator();
+    if (revealQueue.length && !revealTimer) revealTimer = setTimeout(revealNext, 1);
+  } else {
+    clearTimeout(revealTimer);
+    revealTimer = null;
+  }
+});
+pbNextEl.addEventListener("click", () => {
+  clearTimeout(revealTimer);
+  revealTimer = null;
+  revealNext();
+});
+
 async function runScript(scriptId, buttons, activeCard) {
   buttons.forEach((b) => (b.disabled = true));
   if (activeCard) activeCard.classList.add("running");
   resetPanels();
+  // The backend's first real call (an Event Hubs connection, then the first
+  // Speech round trip) can take well over 10s before anything is enqueued --
+  // without this, the whole page just sits there looking broken for that
+  // stretch. Show that something is happening from the first click, not
+  // from the first event.
+  playbackBarEl.style.display = "flex";
+  pbStatusEl.textContent = "starting call…";
+  showTypingIndicator();
+  const revealed = new Promise((resolve) => { onFullyRevealed = resolve; });
   try {
     const runResp = await fetch(`/api/run/${scriptId}`, { method: "POST" });
     const { call_id } = await runResp.json();
@@ -246,11 +362,13 @@ async function runScript(scriptId, buttons, activeCard) {
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
         if (!line.trim()) continue;
-        const evt = JSON.parse(line);
-        logLine(evt);
-        dispatch(evt);
+        enqueueEvent(JSON.parse(line));
       }
     }
+    streamDone = true;
+    updatePlaybackStatus();
+    if (!revealQueue.length) onFullyRevealed?.();
+    await revealed;
   } finally {
     buttons.forEach((b) => (b.disabled = false));
     if (activeCard) activeCard.classList.remove("running");
@@ -330,20 +448,21 @@ async function loadScripts() {
   const resp = await fetch("/api/scripts");
   const scripts = await resp.json();
   clearChildren(controls);
-  const cards = [];
+  const rows = [];
   for (const s of scripts) {
     const cat = SCENARIO_CATEGORY[s.id] || { tag: "SCENARIO", color: "var(--muted)" };
-    const card = document.createElement("button");
-    card.className = "scenario-card";
-    card.innerHTML = `
-      <div class="scenario-card-top">
-        <span class="scenario-tag" style="background:${cat.color}">${cat.tag}</span>
+    const row = document.createElement("button");
+    row.className = "scenario-row";
+    row.title = s.title;  // full text on hover via native tooltip too, for a long sidebar list
+    row.innerHTML = `
+      <span class="scenario-tag" style="background:${cat.color}">${cat.tag}</span>
+      <div class="scenario-row-text">
         <span class="scenario-customer">${s.customer_id || ""}</span>
-      </div>
-      <div class="scenario-title">${s.title}</div>`;
-    cards.push(card);
-    card.addEventListener("click", () => runScript(s.id, cards, card));
-    controls.appendChild(card);
+        <div class="scenario-title">${s.title}</div>
+      </div>`;
+    rows.push(row);
+    row.addEventListener("click", () => runScript(s.id, rows, row));
+    controls.appendChild(row);
   }
 }
 
