@@ -162,19 +162,27 @@ def start_call(script_id: str) -> str:
                 iid = stage_start("sentiment")
                 t0 = time.perf_counter()
                 sentiment = analyse_sentiment(recognized)
-                stage_done("sentiment", iid, (time.perf_counter() - t0) * 1000, {"score": sentiment})
+                sentiment_ms = (time.perf_counter() - t0) * 1000
+
+                # Rolling (EWMA) sentiment lives in Redis and smooths across the
+                # whole call so far -- it's a different, deliberately damped
+                # number from this turn's raw score. Computing it here (instead
+                # of after stage_done below) lets both render side by side, so
+                # it's obvious why e.g. a raw 0.93 this turn only moves the
+                # call's running sentiment to 0.61.
+                iid_redis = stage_start("redis")
+                rolling = state.update_sentiment(sentiment)
+                redis_ms = state.round_trip_latencies_s[-1] * 1000
+                stage_done("sentiment", iid, sentiment_ms,
+                           {"this_turn_score": sentiment, "rolling_sentiment_so_far": round(rolling, 3)})
+                stage_done("redis", iid_redis, redis_ms, {"rolling_sentiment": round(rolling, 3)})
+                seq.emit(SENTIMENT_UPDATED, {"utterance_sentiment": sentiment, "rolling_sentiment": round(rolling, 3)})
 
                 # --- theme tagging (local keyword match, not a cloud call) ---
                 iid = stage_start("theme")
                 t0 = time.perf_counter()
                 themes = tag_themes(recognized)
                 stage_done("theme", iid, (time.perf_counter() - t0) * 1000, {"themes": themes})
-
-                # --- hot state (real Redis) ---
-                iid = stage_start("redis")
-                rolling = state.update_sentiment(sentiment)
-                stage_done("redis", iid, state.round_trip_latencies_s[-1] * 1000, {"rolling_sentiment": round(rolling, 3)})
-                seq.emit(SENTIMENT_UPDATED, {"utterance_sentiment": sentiment, "rolling_sentiment": round(rolling, 3)})
 
                 if themes:
                     iid = stage_start("redis")

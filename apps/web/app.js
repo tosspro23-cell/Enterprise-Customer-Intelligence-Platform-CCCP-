@@ -14,6 +14,8 @@ const playbackBarEl = document.getElementById("playback-bar");
 const pbToggleEl = document.getElementById("pb-toggle");
 const pbNextEl = document.getElementById("pb-next");
 const pbStatusEl = document.getElementById("pb-status");
+const pbVoiceToggleEl = document.getElementById("pb-voice-toggle");
+const pbSpeedEl = document.getElementById("pb-speed");
 const traceCurrentEl = document.getElementById("trace-current");
 const traceCurrentTextEl = document.getElementById("trace-current-text");
 
@@ -336,6 +338,13 @@ let streamDone = false;
 let autoPlay = true;
 let onFullyRevealed = null;
 
+// Voice playback is a user preference, not per-call state -- it (and the
+// speed multiplier) survives resetPlayback() so it stays on across runs.
+let voiceEnabled = false;
+let paceMultiplier = 1;
+let pendingAudioB64 = null;  // the most recent pipeline.audio clip, waiting for its matching bubble
+let currentAudio = null;
+
 function resetPlayback() {
   revealQueue = [];
   streamDone = false;
@@ -343,11 +352,21 @@ function resetPlayback() {
   clearTimeout(revealTimer);
   revealTimer = null;
   onFullyRevealed = null;
+  pendingAudioB64 = null;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   hideTypingIndicator();
   playbackBarEl.style.display = "none";
   pbToggleEl.textContent = "⏸ Pause";
   pbStatusEl.textContent = "";
 }
+
+pbVoiceToggleEl.addEventListener("change", () => {
+  voiceEnabled = pbVoiceToggleEl.checked;
+  if (!voiceEnabled && currentAudio) { currentAudio.pause(); currentAudio = null; }
+});
+pbSpeedEl.addEventListener("change", () => {
+  paceMultiplier = parseFloat(pbSpeedEl.value) || 1;
+});
 
 function updatePlaybackStatus() {
   pbNextEl.disabled = revealQueue.length === 0;
@@ -363,6 +382,31 @@ function enqueueEvent(evt) {
   if (autoPlay && !revealTimer) revealTimer = setTimeout(revealNext, 1);
 }
 
+// When voice is on and the event just revealed was the customer's line, pace
+// the NEXT reveal off the real length of their synthesised clip instead of a
+// fixed delay -- that's what makes it feel like an actual call rather than a
+// transcript with a voice memo attached. Returns true if it took over pacing.
+function tryPlayVoice(evt) {
+  if (!voiceEnabled) return false;
+  if (evt?.event_type !== "transcript.utterance_final") return false;
+  if ((evt.payload || {}).channel !== "customer") return false;
+  if (!pendingAudioB64) return false;
+  const audio = new Audio(`data:audio/wav;base64,${pendingAudioB64}`);
+  pendingAudioB64 = null;
+  if (currentAudio) currentAudio.pause();
+  currentAudio = audio;
+  const advance = () => {
+    if (currentAudio === audio) currentAudio = null;
+    if (autoPlay) revealTimer = setTimeout(revealNext, 1);
+  };
+  audio.addEventListener("ended", advance, { once: true });
+  audio.addEventListener("error", advance, { once: true });
+  // Autoplay can be blocked without a recent user gesture -- if it is, don't
+  // stall the call waiting for a clip that will never play.
+  audio.play().catch(advance);
+  return true;
+}
+
 function revealNext() {
   revealTimer = null;
   hideTypingIndicator();
@@ -371,6 +415,9 @@ function revealNext() {
     logLine(evt);
     dispatch(evt);
   }
+  // Plays regardless of autoPlay (manual "Next" should still voice the line);
+  // only its effect on pacing is conditional on autoPlay, below.
+  const playingVoice = tryPlayVoice(evt);
   updatePlaybackStatus();
   if (!revealQueue.length && streamDone) {
     onFullyRevealed?.();
@@ -378,7 +425,8 @@ function revealNext() {
   }
   if (autoPlay) {
     if (revealQueue.length) {
-      revealTimer = setTimeout(revealNext, PACE_MS[evt?.event_type] ?? DEFAULT_PACE_MS);
+      if (playingVoice) return;  // pacing resumes from the clip's 'ended'/'error' handler
+      revealTimer = setTimeout(revealNext, (PACE_MS[evt?.event_type] ?? DEFAULT_PACE_MS) * paceMultiplier);
     } else {
       showTypingIndicator();  // backend's still going; say so instead of looking stuck
     }
@@ -390,10 +438,15 @@ pbToggleEl.addEventListener("click", () => {
   pbToggleEl.textContent = autoPlay ? "⏸ Pause" : "▶ Play";
   if (autoPlay) {
     hideTypingIndicator();
-    if (revealQueue.length && !revealTimer) revealTimer = setTimeout(revealNext, 1);
+    if (currentAudio && currentAudio.paused) {
+      currentAudio.play().catch(() => {});  // resume the in-flight clip rather than restart it
+    } else if (revealQueue.length && !revealTimer) {
+      revealTimer = setTimeout(revealNext, 1);
+    }
   } else {
     clearTimeout(revealTimer);
     revealTimer = null;
+    if (currentAudio) currentAudio.pause();
   }
 });
 pbNextEl.addEventListener("click", () => {
@@ -455,6 +508,9 @@ function dispatch(evt) {
     return;
   }
   if (evt.event_type === "pipeline.audio") {
+    // Stashed for the matching transcript.utterance_final bubble (next in the
+    // queue) to pick up and play if voice mode is on -- see tryPlayVoice().
+    pendingAudioB64 = p.audio_base64 || null;
     const entry = traceRowsById[p.instance_id];
     if (entry && p.audio_base64) {
       const audio = document.createElement("audio");
