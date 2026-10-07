@@ -44,8 +44,8 @@ grounded context.
 ## Run it
 
 ```bash
-python -m unittest discover -s tests -v     # 25 contract tests (agent + reference slice)
-python evals/run_evals.py                   # 22 behavioural evals, writes evals/report/
+python -m unittest discover -s tests -v     # 32 contract tests (agent + reference slice)
+python evals/run_evals.py                   # 27 behavioural evals, writes evals/report/
 python demo.py cust_001                      # golden scenario, full JSON incl. evidence + trace
 python demo.py cust_001 -0.7                 # same customer, live call strongly negative -> deferred
 ```
@@ -73,8 +73,9 @@ python apps/api/server.py
 This spins up a scripted call simulator (`src/cccp_platform/`) that feeds
 the *real* `CommercialDecisionAgent` a `LiveCallSignal` turn by turn, exactly
 as the real-time stream processor would (see
-[docs/architecture.md](docs/architecture.md) §5). Two scripted calls are
-included:
+[docs/architecture.md](docs/architecture.md) §5). Eleven scripted calls are
+included in `data/calls/` (one per synthetic customer scenario); the two that
+show the core flow best:
 
 - **`golden_savings`** -- the customer opens angry about fees (live
   sentiment -0.6 -> `deferred`, model never scored), calms down, then asks
@@ -264,19 +265,19 @@ Dockerfile, .github/workflows/build-push-ghcr.yml   builds the load-test image, 
 infra/main.bicep     every Azure resource above, as code (see infra/README.md)
 docs/            platform architecture (functional, technology, real-time, governance)
 data/synthetic/  customers, interactions, model scores, catalog, guidance
-data/calls/      the two scripted calls the Workbench runs
-evals/           cases.json (22 scenarios), run_evals.py, report/
+data/calls/      the 11 scripted calls the Workbench runs
+evals/           cases.json (27 scenarios), run_evals.py, report/
 tests/           unit / contract tests (agent + reference slice)
 ```
 
 ## Claim discipline
 
 Validated: policy/eval behaviour on synthetic scenarios with a deterministic
-narrator stub (22/22 evals pass, 0 critical failures, 0 policy violations in
+narrator stub (27/27 evals pass, 0 critical failures, 0 policy violations in
 final text -- see `evals/report/eval_report_stub.md`); the reference slice's
 event sequencing, trigger-to-decision wiring and post-call persistence
-(25/25 unit/contract tests); narrator correctness against a live Azure
-OpenAI endpoint (16/16 eval cases, decision accuracy 1.0 -- see
+(32/32 unit/contract tests); narrator correctness against a live Azure
+OpenAI endpoint (16/16 eval cases on eval suite v1.0.0, decision accuracy 1.0 -- see
 `evals/report/eval_report_azure.md`); the full hot-path dependency set
 (Event Hubs, Azure Managed Redis, Azure AI Search, Azure OpenAI) running
 for real and holding up under light concurrency, twice -- once from a
@@ -287,7 +288,11 @@ real services (Azure TTS -> Azure STT -> Azure AI Language sentiment)
 producing the same decision outcomes as the hand-labelled script did; a
 container image built by CI and deployed to Azure Container Apps.
 
-Not validated: latency or cost at production call volume (tens of
+Not validated: semantic faithfulness of narrator text beyond what a lexical
+validator can see -- it rejects unsupported numbers (digits and spelled-out
+percentages), other products' names, uncited output and listed prohibited
+phrases, but a paraphrased promise ("you will definitely earn more") still
+passes it; latency or cost at production call volume (tens of
 concurrent calls, not six, which is what the real-time budget in
 docs/architecture.md §9.7 is actually about); a true same-region
 deployment (the Container Apps run landed in a different Azure region

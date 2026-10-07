@@ -159,6 +159,9 @@ class CommercialDecisionAgent:
             try:
                 with tr.span("search_guidance", product_id=cand.product_id, situation=situation):
                     guidance = self.guidance.search_commercial_guidance(cand.product_id, situation)
+                    # Guidance not yet in force is not approved guidance (enforced here, not
+                    # trusted to each index adapter).
+                    guidance = [g for g in guidance if g.effective_date <= req.as_of]
             except DependencyError:
                 degraded.append("guidance_unavailable")
                 return result(Outcome.UNAVAILABLE,

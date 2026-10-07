@@ -16,7 +16,6 @@ from datetime import date
 from pathlib import Path
 
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import ResourceNotFoundError
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import (SearchableField, SearchField, SearchFieldDataType, SearchIndex,

@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -27,6 +26,11 @@ from cccp_agent.adapters.synthetic import SyntheticEstate  # noqa: E402
 from loadtest import run_level  # noqa: E402
 
 PORT = 8080
+# Every load-test call hits paid services (Azure OpenAI, Search, Redis, Event
+# Hubs) and the endpoint is public: cap what one request can trigger.
+MAX_CONCURRENCY = 10
+MAX_CALLS_PER_LEVEL = 20
+MAX_LEVELS = 5
 _last_report: dict | None = None
 _running = False
 _lock = threading.Lock()
@@ -54,24 +58,37 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/loadtest":
             return self.send_error(404)
         global _running
+        # Validate before taking the run slot: a bad query string used to raise
+        # after `_running = True`, leaving every later request stuck on 409.
+        qs = parse_qs(parsed.query)
+        try:
+            levels = [int(x) for x in qs.get("concurrency", ["1,3,6"])[0].split(",")]
+            calls = int(qs.get("calls", ["6"])[0])
+        except ValueError:
+            return self._json(400, {"status": "concurrency and calls must be integers"})
+        if not (0 < len(levels) <= MAX_LEVELS and all(0 < c <= MAX_CONCURRENCY for c in levels)
+                and 0 < calls <= MAX_CALLS_PER_LEVEL):
+            return self._json(400, {"status": "out of range", "max_levels": MAX_LEVELS,
+                                     "max_concurrency": MAX_CONCURRENCY, "max_calls": MAX_CALLS_PER_LEVEL})
         with _lock:
             if _running:
                 return self._json(409, {"status": "already running"})
             _running = True
-        qs = parse_qs(parsed.query)
-        levels = [int(x) for x in qs.get("concurrency", ["1,3,6"])[0].split(",")]
-        calls = int(qs.get("calls", ["6"])[0])
         threading.Thread(target=self._run, args=(levels, calls), daemon=True).start()
         return self._json(202, {"status": "started", "concurrency": levels, "calls_per_level": calls})
 
     def _run(self, levels: list[int], calls: int) -> None:
         global _last_report, _running
-        estate = SyntheticEstate()
-        report = {"levels": [], "source": "container-apps-same-region"}
-        for c in levels:
-            report["levels"].append(run_level(c, calls, estate, narrator_timeout_s=20.0))
-        _last_report = report
-        _running = False
+        try:
+            estate = SyntheticEstate()
+            report = {"levels": [], "source": "container-apps-same-region"}
+            for c in levels:
+                report["levels"].append(run_level(c, calls, estate, narrator_timeout_s=20.0))
+            _last_report = report
+        except Exception as e:  # noqa: BLE001 - surface the failure via /report instead of dying silently
+            _last_report = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+        finally:
+            _running = False
 
     def log_message(self, fmt: str, *args) -> None:
         pass

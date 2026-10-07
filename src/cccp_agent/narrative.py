@@ -8,7 +8,6 @@ deterministic template so a bad generation can never reach the agent.
 """
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -94,6 +93,7 @@ def _strip_identifiers(text: str, payload: dict[str, Any]) -> str:
     idents: list[str] = [str(rp.get("model", "")), str(rp.get("product_id", ""))]
     if ":" in idents[0]:
         idents += idents[0].split(":", 1)
+    idents += [str(g.get("document_id", "")) for g in payload.get("approved_guidance") or []]
     keys: list[str] = []
 
     def walk(o: Any) -> None:

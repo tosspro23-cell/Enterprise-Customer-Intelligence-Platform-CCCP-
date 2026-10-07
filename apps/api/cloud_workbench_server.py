@@ -172,15 +172,19 @@ def start_call(script_id: str) -> str:
                 stt_result = speech_transcribe(audio)
                 stt_s = time.perf_counter() - t0
                 stage_done("stt", iid, (tts_s + stt_s) * 1000, {"original": turn["text"],
-                                                                 "recognized": stt_result.recognized_text,
+                                                                 "recognized": stt_result.recognized_text or
+                                                                 "(nothing recognised -- script text used downstream)",
                                                                  "tts_s": round(tts_s, 2), "stt_s": round(stt_s, 2)})
                 # Audio is browser-only, never published to Event Hubs -- domain events
                 # carry facts about a call, never raw audio (docs/architecture.md §8.1).
                 browser_put("pipeline.audio", {"instance_id": iid,
                                                 "audio_base64": base64.b64encode(audio).decode("ascii")})
+                # Empty recognition falls back to the script text so the call can go on,
+                # but the fallback is recorded -- the trace must not imply STT produced it.
+                stt_fallback = not stt_result.recognized_text
                 recognized = stt_result.recognized_text or turn["text"]
                 seq.emit(UTTERANCE_FINAL, {"channel": "customer", "text": turn["text"],
-                                            "_stt": {"recognized_text": recognized}})
+                                            "_stt": {"recognized_text": recognized, "fallback_to_script": stt_fallback}})
 
                 # --- real sentiment ---
                 iid = stage_start("sentiment")

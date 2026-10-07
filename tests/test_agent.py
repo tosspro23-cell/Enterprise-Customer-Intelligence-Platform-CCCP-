@@ -159,6 +159,24 @@ class TestAgentEndToEnd(unittest.TestCase):
         r = self._agent(StubNarrator(), "error").run(DecisionRequest("cust_001", AS_OF))
         self.assertEqual((r.outcome, r.recommendation, r.candidates), (Outcome.UNAVAILABLE, None, ()))
 
+    def test_guidance_not_yet_effective_is_not_used(self):
+        from dataclasses import replace
+
+        class FutureGuidance:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def search_commercial_guidance(self, product_id, situation):
+                return [replace(g, effective_date=date(2027, 1, 1))
+                        for g in self._inner.search_commercial_guidance(product_id, situation)]
+
+        e = self.e
+        r = CommercialDecisionAgent(e.customer_port(), e.interaction_port(), e.model_port(),
+                                    FutureGuidance(e.guidance_port()), e.catalog, StubNarrator()
+                                    ).run(DecisionRequest("cust_001", AS_OF))
+        self.assertEqual(r.outcome, Outcome.NO_RECOMMENDATION)
+        self.assertTrue(any(d.rule_id == "G1_no_approved_guidance" for d in r.policy_decisions))
+
     def test_missing_history_fails_closed(self):
         # cust_009 is deferred (R3) and cust_006 has a recent decline (P4) -- both rules need history.
         for cid in ("cust_009", "cust_006", "cust_004"):

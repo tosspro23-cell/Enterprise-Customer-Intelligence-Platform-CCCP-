@@ -63,6 +63,11 @@ const STAGE_CATALOG = {
 };
 
 function clearChildren(el) { el.innerHTML = ""; }
+// Anything that came from the server (LLM narrator output, transcripts, stored
+// records) is data: escape it before it goes anywhere near innerHTML.
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
 function emptySpan(text) { const s = document.createElement("span"); s.className = "empty"; s.textContent = text; return s; }
 
 function logLine(evt) {
@@ -627,8 +632,8 @@ async function loadScripts() {
     row.innerHTML = `
       <span class="scenario-tag" style="background:${cat.color}">${cat.tag}</span>
       <div class="scenario-row-text">
-        <span class="scenario-customer">${s.customer_id || ""}</span>
-        <div class="scenario-title">${s.title}</div>
+        <span class="scenario-customer">${esc(s.customer_id)}</span>
+        <div class="scenario-title">${esc(s.title)}</div>
       </div>`;
     rows.push(row);
     row.addEventListener("click", () => runScript(s.id, rows, row));
@@ -772,11 +777,11 @@ function renderSvCalls(calls) {
   for (const c of calls) {
     const row = document.createElement("div");
     row.className = "sv-call-row";
-    const outcomeBadge = `<span class="sv-call-outcome" style="background:${OUTCOME_COLOR[c.outcome] || "var(--muted)"}">${c.outcome.replace(/_/g, " ")}</span>`;
+    const outcomeBadge = `<span class="sv-call-outcome" style="background:${OUTCOME_COLOR[c.outcome] || "var(--muted)"}">${esc(c.outcome.replace(/_/g, " "))}</span>`;
     row.innerHTML = `
       ${outcomeBadge}
-      <span class="sv-call-meta">${c.scenario_id || c.call_id} · ${c.customer_id}${c.product_id ? " → " + c.product_id : ""}</span>
-      <span class="sv-call-time">${(c.ended_at || "").replace("T", " ").slice(0, 19)}</span>`;
+      <span class="sv-call-meta">${esc(c.scenario_id || c.call_id)} · ${esc(c.customer_id)}${c.product_id ? " → " + esc(c.product_id) : ""}</span>
+      <span class="sv-call-time">${esc((c.ended_at || "").replace("T", " ").slice(0, 19))}</span>`;
     row.addEventListener("click", () => {
       svCallsEl.querySelectorAll(".sv-call-row.selected").forEach((r) => r.classList.remove("selected"));
       row.classList.add("selected");
@@ -812,13 +817,13 @@ function renderReplay(events) {
       const b = document.createElement("div");
       b.className = `bubble ${p.channel}`;
       b.style.maxWidth = "100%";
-      b.innerHTML = `<span class="ch">${p.channel}</span>${p.text}`;
+      b.innerHTML = `<span class="ch">${esc(p.channel)}</span>${esc(p.text)}`;
       transcript.appendChild(b);
     } else if (evt.event_type === "commercial.decision_made") {
-      decisionHtml = `<div class="status-banner status-${p.outcome}" style="margin:10px 0 4px">${p.outcome.replace(/_/g, " ").toUpperCase()}</div>
-        <div class="citelist">policy: ${(p.policy_decisions || []).join(", ") || "(none fired)"}</div>`;
+      decisionHtml = `<div class="status-banner status-${esc(p.outcome)}" style="margin:10px 0 4px">${esc(p.outcome.replace(/_/g, " ").toUpperCase())}</div>
+        <div class="citelist">policy: ${esc((p.policy_decisions || []).join(", ") || "(none fired)")}</div>`;
     } else if (evt.event_type === "copilot.suggestion_generated") {
-      decisionHtml += `<div class="suggestion-text">${p.explanation}</div><div class="citelist">cites: ${(p.cited_document_ids || []).join(", ") || "none"}</div>`;
+      decisionHtml += `<div class="suggestion-text">${esc(p.explanation)}</div><div class="citelist">cites: ${esc((p.cited_document_ids || []).join(", ") || "none")}</div>`;
     } else if (evt.event_type === "pipeline.stage" && p.status === "done") {
       const meta = STAGE_CATALOG[p.stage] || { code: p.stage.toUpperCase(), source: "local" };
       const row = document.createElement("div");
