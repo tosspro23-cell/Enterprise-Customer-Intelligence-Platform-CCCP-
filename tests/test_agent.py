@@ -79,7 +79,12 @@ class TestValidator(unittest.TestCase):
         self.e = SyntheticEstate()
         self.p = self.e.catalog["savings_plus"]
         self.g = self.e.guidance_port().search_commercial_guidance("savings_plus", "post_resolution")
-        self.payload = {"recommended_product": {"propensity_pct": 82}, "g": [x.text for x in self.g]}
+        self.payload = {"recommended_product": {"product_id": "savings_plus", "propensity_pct": 82,
+                                                "model": "xsell-propensity:2026.09.1-synthetic"},
+                        "customer_context": {"sentiment_trend_12m": "improving"},
+                        "approved_guidance": [{"document_id": x.document_id, "version": x.version,
+                                               "section": x.section, "text": x.text} for x in self.g],
+                        "constraints": {"max_chars": 600}}
 
     def _v(self, raw):
         return validate_explanation(raw, product=self.p, catalog=self.e.catalog, guidance=self.g, payload=self.payload)
@@ -98,6 +103,27 @@ class TestValidator(unittest.TestCase):
                   "prohibited_phrase"):
             self.assertIn(k, errs)
 
+    def test_identifiers_are_not_allowed_numbers(self):
+        # Digits that only exist in key names, constraints, versions or the model id are not facts.
+        self.assertEqual(allowed_numbers(self.payload), {"82", "1000"})
+        for claim in ("a 12% rate", "save 600 EUR", "a 5% bonus", "earn 1% more", "five percent bonus"):
+            raw = {"product_id": "savings_plus", "explanation": f"Savings Plus: {claim}.",
+                   "cited_document_ids": ["commercial-offers-savings"]}
+            self.assertTrue(any(e.startswith("unsupported_number") for e in self._v(raw)), claim)
+
+    def test_identifier_references_are_not_claims(self):
+        ok = {"product_id": "savings_plus", "cited_document_ids": ["commercial-offers-savings"],
+              "explanation": "xsell-propensity:2026.09.1-synthetic scores Savings Plus 82% with a stable "
+                             "12\u2011month trend; follow commercial-offers-savings version 5 section 2.1."}
+        self.assertEqual(self._v(ok), [])
+
+    def test_obfuscated_product_and_phrase_detected(self):
+        bad = {"product_id": "savings_plus", "explanation": "Savings Plus beats the Premium-Card; no-risk.",
+               "cited_document_ids": ["commercial-offers-savings"]}
+        errs = " ".join(self._v(bad))
+        self.assertIn("mentions_other_product: premium_card", errs)
+        self.assertIn("prohibited_phrase: no risk", errs)
+
     def test_non_dict(self):
         self.assertTrue(self._v("not json")[0].startswith("schema"))
 
@@ -106,10 +132,10 @@ class TestAgentEndToEnd(unittest.TestCase):
     def setUp(self):
         self.e = SyntheticEstate()
 
-    def _agent(self, narrator=None, model_fault=None):
+    def _agent(self, narrator=None, model_fault=None, interactions_fault=None):
         e = self.e
-        return CommercialDecisionAgent(e.customer_port(), e.interaction_port(), e.model_port(model_fault),
-                                        e.guidance_port(), e.catalog, narrator)
+        return CommercialDecisionAgent(e.customer_port(), e.interaction_port(interactions_fault),
+                                        e.model_port(model_fault), e.guidance_port(), e.catalog, narrator)
 
     def test_golden(self):
         r = self._agent(StubNarrator()).run(DecisionRequest("cust_001", AS_OF))
@@ -132,6 +158,13 @@ class TestAgentEndToEnd(unittest.TestCase):
     def test_model_error_never_fabricates(self):
         r = self._agent(StubNarrator(), "error").run(DecisionRequest("cust_001", AS_OF))
         self.assertEqual((r.outcome, r.recommendation, r.candidates), (Outcome.UNAVAILABLE, None, ()))
+
+    def test_missing_history_fails_closed(self):
+        # cust_009 is deferred (R3) and cust_006 has a recent decline (P4) -- both rules need history.
+        for cid in ("cust_009", "cust_006", "cust_004"):
+            r = self._agent(StubNarrator(), interactions_fault="error").run(DecisionRequest(cid, AS_OF))
+            self.assertEqual((r.outcome, r.recommendation), (Outcome.UNAVAILABLE, None), cid)
+            self.assertIn("interaction_history_unavailable", r.degraded)
 
 
 if __name__ == "__main__":

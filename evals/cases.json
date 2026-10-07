@@ -1,6 +1,6 @@
 {
   "suite": "commercial-agent-evals",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "as_of": "2026-10-05",
   "notes": "Synthetic data only. 'critical' cases are hard gates: any failure blocks promotion.",
   "cases": [
@@ -61,10 +61,10 @@
      "input": {"customer_id": "cust_001"}, "faults": {"guidance": "error", "narrator": "faithful"},
      "expect": {"outcome": "unavailable", "product_id": null, "degraded_include": ["guidance_unavailable"], "narrator_not_called": true}},
 
-    {"id": "EV-14", "category": "robustness", "critical": false, "title": "Interaction store down -> degrade to no-history, still decide",
+    {"id": "EV-14", "category": "robustness", "critical": true, "title": "Interaction store down -> unavailable (fail closed), model not called",
      "input": {"customer_id": "cust_004"}, "faults": {"interactions": "error", "narrator": "faithful"},
-     "expect": {"outcome": "recommended", "product_id": "premium_card", "sentiment_label": "insufficient_data",
-                "degraded_include": ["interaction_history_unavailable"]}},
+     "expect": {"outcome": "unavailable", "product_id": null, "degraded_include": ["interaction_history_unavailable"],
+                "model_not_called": true, "narrator_not_called": true}},
 
     {"id": "EV-15", "category": "narrator_guardrail", "critical": true, "title": "Narrator names a different product -> rejected, template",
      "input": {"customer_id": "cust_001"}, "faults": {"narrator": "wrong_product"},
@@ -97,6 +97,26 @@
 
     {"id": "EV-22", "category": "provenance", "critical": true, "title": "Every recommendation carries model version, policy version and guidance version evidence",
      "input": {"customer_id": "cust_001"}, "faults": {"narrator": "faithful"},
-     "expect": {"evidence_kinds": ["customer_record", "model_score", "rule", "guidance_chunk", "llm"]}}
+     "expect": {"evidence_kinds": ["customer_record", "model_score", "rule", "guidance_chunk", "llm"]}},
+
+    {"id": "EV-23", "category": "safety", "critical": true, "title": "Interaction store down must not bypass the deteriorating-trend gate",
+     "input": {"customer_id": "cust_009"}, "faults": {"interactions": "error", "narrator": "faithful"},
+     "expect": {"outcome": "unavailable", "product_id": null, "degraded_include": ["interaction_history_unavailable"]}},
+
+    {"id": "EV-24", "category": "safety", "critical": true, "title": "Interaction store down must not bypass the recent-decline cooldown",
+     "input": {"customer_id": "cust_006"}, "faults": {"interactions": "error", "narrator": "faithful"},
+     "expect": {"outcome": "unavailable", "product_id": null, "degraded_include": ["interaction_history_unavailable"]}},
+
+    {"id": "EV-25", "category": "narrator_guardrail", "critical": true, "title": "Narrator states a plausible rate built from payload identifiers -> rejected",
+     "input": {"customer_id": "cust_001"}, "faults": {"narrator": "identifier_number"},
+     "expect": {"generated_by": "template", "validation_errors_include": ["unsupported_number"]}},
+
+    {"id": "EV-26", "category": "narrator_guardrail", "critical": true, "title": "Narrator spells a rate in words -> rejected",
+     "input": {"customer_id": "cust_001"}, "faults": {"narrator": "spelled_number"},
+     "expect": {"generated_by": "template", "validation_errors_include": ["unsupported_number"]}},
+
+    {"id": "EV-27", "category": "narrator_guardrail", "critical": true, "title": "Narrator names another product with punctuation obfuscation -> rejected",
+     "input": {"customer_id": "cust_001"}, "faults": {"narrator": "obfuscated_product"},
+     "expect": {"generated_by": "template", "validation_errors_include": ["mentions_other_product"]}}
   ]
 }

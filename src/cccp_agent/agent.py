@@ -97,15 +97,21 @@ class CommercialDecisionAgent:
                                                                       "D1_dependency"), empty)
         evidence.append(Evidence("customer_record", "customer_directory", customer.customer_id))
 
-        # 2. Interaction history (optional: degrade to no-history rather than fail)
+        # 2. Interaction history (required: R3 deteriorating-relationship and P4
+        # decline-cooldown both read it, so an empty stand-in would silently
+        # disable them -- fail closed, never offer on missing history)
         since = req.as_of - timedelta(days=req.lookback_days)
         try:
             with tr.span("get_interactions") as s:
                 history = self.interactions.get_interactions(customer.customer_id, since)
                 s["n"] = len(history)
         except DependencyError:
-            history = []
             degraded.append("interaction_history_unavailable")
+            empty = SentimentTrend("insufficient_data", 0, None, None, None, None,
+                                   req.live_signal.current_sentiment if req.live_signal else None)
+            return result(Outcome.UNAVAILABLE,
+                           non_offer_explanation("interaction history unavailable; history-based policy rules "
+                                                  "cannot be evaluated", "D4_history_unavailable"), empty)
         evidence += [Evidence("interaction", "interaction_history", i.interaction_id) for i in history]
 
         # 3. Deterministic analytics: sentiment trend + key themes

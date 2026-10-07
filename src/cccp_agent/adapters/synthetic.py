@@ -132,6 +132,7 @@ class StubNarrator:
     """Deterministic narrator stand-in with failure modes for evaluation.
 
     modes: faithful | wrong_product | invented_number | prohibited_claim | uncited | malformed | timeout
+           | identifier_number | spelled_number | obfuscated_product
     """
 
     def __init__(self, mode: str = "faithful") -> None:
@@ -161,4 +162,10 @@ class StubNarrator:
             out["cited_document_ids"] = []
         elif self.mode == "malformed":
             out = {"text": text}
+        elif self.mode == "identifier_number":  # "12" only exists in the payload as part of `sentiment_trend_12m`
+            out["explanation"] = text + " It pays 12% a year."
+        elif self.mode == "spelled_number":
+            out["explanation"] = text + " Mention the five percent welcome bonus."
+        elif self.mode == "obfuscated_product":
+            out["explanation"] = text + " Simpler than the Premium-Card."
         return out

@@ -16,8 +16,14 @@ from .domain import Explanation, GuidanceChunk, Product, ProductScore, Sentiment
 
 PROMPT_PROFILE = "commercial_explanation_v1"
 MAX_CHARS = 600
-GLOBAL_PROHIBITED = ("guarantee", "risk-free", "no fees ever", "free forever")
+GLOBAL_PROHIBITED = ("guarantee", "risk-free", "no risk", "no fees ever", "free forever")
 _NUM_RE = re.compile(r"\d+(?:[.,]\d+)?")
+_DASHES = "\\-\u2010-\u2015"   # ASCII hyphen + Unicode hyphens/dashes (LLMs emit e.g. U+2011)
+# Spelled-out quantities attached to a rate/percentage ("five percent") would
+# otherwise slip past a digit-only check.
+_WORD_PCT_RE = re.compile(
+    r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|"
+    r"sixty|seventy|eighty|ninety|hundred|half)\b[\s\-\u2010-\u2015]*(?:percent|per\s*cent|%)", re.I)
 
 SYSTEM_PROMPT = """You write a short internal note for a contact-centre agent explaining WHY a
 product recommendation was made and HOW to position it.
@@ -66,7 +72,56 @@ def build_narrator_payload(
 
 
 def allowed_numbers(payload: dict[str, Any]) -> set[str]:
-    return {n.replace(",", ".") for n in _NUM_RE.findall(json.dumps(payload))}
+    """Numbers the narrator may state as facts: the propensity it was given and
+    figures that appear in the approved guidance text. Deliberately NOT every
+    digit in the serialised payload -- key names (`sentiment_trend_12m`),
+    constraints (`max_chars`), versions and section numbers are identifiers,
+    not facts, and allowing them let e.g. "a 5% bonus" or "12% a year" pass."""
+    out: set[str] = set()
+    pct = (payload.get("recommended_product") or {}).get("propensity_pct")
+    if pct is not None:
+        out.add(str(pct))
+    for g in payload.get("approved_guidance") or []:
+        out |= {n.replace(",", ".") for n in _NUM_RE.findall(str(g.get("text", "")))}
+    return out
+
+
+def _strip_identifiers(text: str, payload: dict[str, Any]) -> str:
+    """Remove references to identifiers in the payload (model name/version,
+    document ids, guidance versions and sections, payload field names) so the
+    digits inside them are not mistaken for factual claims."""
+    rp = payload.get("recommended_product") or {}
+    idents: list[str] = [str(rp.get("model", "")), str(rp.get("product_id", ""))]
+    if ":" in idents[0]:
+        idents += idents[0].split(":", 1)
+    keys: list[str] = []
+
+    def walk(o: Any) -> None:
+        if isinstance(o, dict):
+            for k, v in o.items():
+                keys.append(str(k))
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(payload)
+    idents += keys
+    out = text
+    # Guidance references first: "version 5" / "section 2.1" must be matched
+    # before the bare key names ("version", "section") are stripped below.
+    for g in payload.get("approved_guidance") or []:
+        ver, sec = (re.escape(str(g.get(k, ""))) for k in ("version", "section"))
+        out = re.sub(rf"\b(?:v|version)\s*{ver}\b", " ", out, flags=re.I)
+        out = re.sub(rf"(?:\bsection|§)\s*{sec}\b", " ", out, flags=re.I)
+    if any("12m" in k for k in keys):  # the trend window the payload itself names
+        out = re.sub(rf"\b12[\s{_DASHES}]*months?\b", " ", out, flags=re.I)
+    for ident in sorted({i for i in idents if i}, key=len, reverse=True):
+        out = re.sub(re.escape(ident), " ", out, flags=re.I)
+    return out
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
 def validate_explanation(
@@ -91,8 +146,11 @@ def validate_explanation(
         errors.append(f"product_mismatch: {pid!r} != {product.product_id!r}")
 
     low = text.lower()
+    # Compare with punctuation/whitespace removed so "Premium-Card" or
+    # "premium  card" cannot slip past an exact-substring match.
+    flat = _norm(text)
     for other in catalog.values():
-        if other.product_id != product.product_id and (other.name.lower() in low or other.product_id in low):
+        if other.product_id != product.product_id and (_norm(other.name) in flat or _norm(other.product_id) in flat):
             errors.append(f"mentions_other_product: {other.product_id}")
 
     valid_ids = {g.document_id for g in guidance}
@@ -103,13 +161,17 @@ def validate_explanation(
             errors.append(f"citation_invalid: {c}")
 
     allowed = allowed_numbers(payload)
-    for n in _NUM_RE.findall(text):
+    for n in _NUM_RE.findall(_strip_identifiers(text, payload)):
         if n.replace(",", ".") not in allowed:
             errors.append(f"unsupported_number: {n}")
+    for m in _WORD_PCT_RE.findall(text):
+        errors.append(f"unsupported_number: {m}")
 
+    # Hyphens/extra whitespace normalised so "risk - free" == "risk-free" == "risk free".
+    spaced = re.sub(rf"[\s{_DASHES}]+", " ", low)
     prohibited = set(GLOBAL_PROHIBITED) | {p.lower() for g in guidance for p in g.prohibited_phrases}
     for p in sorted(prohibited):
-        if p in low:
+        if re.sub(rf"[\s{_DASHES}]+", " ", p) in spaced:
             errors.append(f"prohibited_phrase: {p}")
 
     if len(text) > MAX_CHARS:
