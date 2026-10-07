@@ -14,6 +14,8 @@ const playbackBarEl = document.getElementById("playback-bar");
 const pbToggleEl = document.getElementById("pb-toggle");
 const pbNextEl = document.getElementById("pb-next");
 const pbStatusEl = document.getElementById("pb-status");
+const traceCurrentEl = document.getElementById("trace-current");
+const traceCurrentTextEl = document.getElementById("trace-current-text");
 
 // What each pipeline stage is, which system backs it, and -- just as
 // important -- whether that system call is real (hits Azure) or a local
@@ -77,7 +79,11 @@ function resetPanels() {
   suggestionAreaEl.innerHTML = "";
   logEl.innerHTML = "";
   clearChildren(traceEl);
+  traceEl.appendChild(emptySpan("Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on."));
   traceRowsById = {};
+  currentGroupBody = null;
+  currentRunningRow = null;
+  setCurrentStep("Not running", true);
 }
 
 function showTypingIndicator() {
@@ -190,12 +196,60 @@ function showPostcall(payload) {
 }
 
 const TRACE_SCALE_MS = 10000; // bar width reference -- the narrator stage runs several seconds
+let currentGroupBody = null;   // where new stage rows get appended -- set by handleGroup()
+let currentRunningRow = null;  // the one row currently highlighted as "happening now"
+
+// A group is purely organisational (which conversation turn, or "the
+// decision" a trigger kicked off) -- it's never a real fact about the call,
+// so like the "running" stage marker it's browser-only, not published.
+function handleGroup(p) {
+  if (traceEl.querySelector(".empty")) clearChildren(traceEl);
+  const group = document.createElement("div");
+  group.className = `trace-group kind-${p.kind}`;
+  group.innerHTML = `<div class="trace-group-header"><span class="trace-group-dot"></span>${p.label}</div>
+    <div class="trace-group-body"></div>`;
+  traceEl.appendChild(group);
+  currentGroupBody = group.querySelector(".trace-group-body");
+  traceEl.scrollTop = traceEl.scrollHeight;
+}
+
+// Most `detail` payloads are now {label: [readable strings]} on purpose
+// (built server-side from real evidence/scores/policy decisions) -- rendered
+// as a plain bullet list so "what did AI Search actually match" is a glance,
+// not a JSON blob to parse. Anything that doesn't fit that shape still
+// degrades to raw JSON further down.
+function renderDetailList(container, detail) {
+  let any = false;
+  for (const [key, val] of Object.entries(detail)) {
+    if (!Array.isArray(val)) continue;
+    any = true;
+    const wrap = document.createElement("div");
+    const label = document.createElement("div");
+    label.style.cssText = "font-size:11px;color:var(--muted);margin-top:6px;text-transform:uppercase;letter-spacing:.02em;";
+    label.textContent = key.replace(/_/g, " ");
+    wrap.appendChild(label);
+    const ul = document.createElement("ul");
+    ul.className = "trace-detail-list";
+    for (const item of val) {
+      const li = document.createElement("li");
+      li.textContent = item;
+      ul.appendChild(li);
+    }
+    wrap.appendChild(ul);
+    container.appendChild(wrap);
+  }
+  return any;
+}
+
+function setCurrentStep(text, idle) {
+  traceCurrentTextEl.textContent = text;
+  traceCurrentEl.classList.toggle("idle", !!idle);
+}
 
 function handleStage(p) {
   const meta = STAGE_CATALOG[p.stage] || { code: p.stage.slice(0, 5).toUpperCase(), label: p.stage, system: "", source: "local", business: "", technical: "" };
   let entry = traceRowsById[p.instance_id];
   if (!entry) {
-    if (traceEl.querySelector(".empty")) clearChildren(traceEl);
     const row = document.createElement("div");
     row.className = `trace-row source-${meta.source}`;
     row.innerHTML = `
@@ -209,29 +263,44 @@ function handleStage(p) {
         <span class="trace-ms"></span>
       </div>
       <div class="trace-bar-track"><div class="trace-bar-fill" style="width:0%"></div></div>
+      <div class="trace-detail-rendered"></div>
       <details>
         <summary>technical detail</summary>
         <div class="trace-technical">${meta.technical}</div>
         <div class="trace-eh-note"></div>
         <pre class="trace-raw" style="display:none"></pre>
       </details>`;
-    traceEl.appendChild(row);
+    (currentGroupBody || traceEl).appendChild(row);
     entry = { el: row };
     traceRowsById[p.instance_id] = entry;
   }
   const row = entry.el;
-  if (p.status === "done") {
+  if (p.status === "running") {
+    if (currentRunningRow) currentRunningRow.classList.remove("is-current");
+    row.classList.add("is-current");
+    currentRunningRow = row;
+    setCurrentStep(`${meta.label} — ${meta.system || "local"}`);
+  } else if (p.status === "done") {
+    row.classList.remove("is-current");
+    if (currentRunningRow === row) { currentRunningRow = null; setCurrentStep("Idle, waiting for next step", true); }
     row.querySelector(".trace-status").className = "trace-status trace-status-done";
     row.querySelector(".trace-status").textContent = "done";
     const ms = typeof p.ms === "number" ? p.ms : 0;
     row.querySelector(".trace-ms").textContent = `${ms.toFixed(0)} ms`;
     row.querySelector(".trace-bar-fill").style.width = Math.min(100, Math.round((ms / TRACE_SCALE_MS) * 100)) + "%";
     if (p.detail && Object.keys(p.detail).length) {
-      const raw = row.querySelector(".trace-raw");
-      raw.style.display = "block";
-      raw.textContent = JSON.stringify(p.detail, null, 2);
+      const rendered = row.querySelector(".trace-detail-rendered");
+      const hadList = renderDetailList(rendered, p.detail);
+      const leftover = Object.fromEntries(Object.entries(p.detail).filter(([, v]) => !Array.isArray(v)));
+      if (!hadList || Object.keys(leftover).length) {
+        const raw = row.querySelector(".trace-raw");
+        raw.style.display = "block";
+        raw.textContent = JSON.stringify(hadList ? leftover : p.detail, null, 2);
+      }
     }
   } else if (p.status === "error") {
+    row.classList.remove("is-current");
+    if (currentRunningRow === row) { currentRunningRow = null; setCurrentStep("Failed -- see detail below", true); }
     row.querySelector(".trace-status").className = "trace-status trace-status-error";
     row.querySelector(".trace-status").textContent = "failed";
     if (p.detail && p.detail.error) {
@@ -377,6 +446,10 @@ async function runScript(scriptId, buttons, activeCard) {
 
 function dispatch(evt) {
   const p = evt.payload || {};
+  if (evt.event_type === "pipeline.group") {
+    handleGroup(p);
+    return;
+  }
   if (evt.event_type === "pipeline.stage") {
     handleStage(p);
     return;

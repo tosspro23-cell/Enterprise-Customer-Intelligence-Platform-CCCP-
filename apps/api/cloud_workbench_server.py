@@ -136,6 +136,9 @@ def start_call(script_id: str) -> str:
                     seq.emit(UTTERANCE_FINAL, {"channel": turn["channel"], "text": turn["text"]})
                     continue
 
+                snippet = turn["text"][:42] + ("…" if len(turn["text"]) > 42 else "")
+                browser_put("pipeline.group", {"kind": "turn", "label": f"Customer turn: “{snippet}”"})
+
                 # --- real voice path: synthesise this line, transcribe it back ---
                 iid = stage_start("stt")
                 t0 = time.perf_counter()
@@ -183,22 +186,56 @@ def start_call(script_id: str) -> str:
                     continue
 
                 # --- the real decision: policy gate -> ML score -> guidance -> narrator ---
+                browser_put("pipeline.group", {"kind": "decision", "label": "Commercial decision triggered"})
                 live = LiveCallSignal(run_id, state.current_sentiment or 0.0, tuple(state.active_themes))
                 result = agent.run(DecisionRequest(script["customer_id"], AS_OF, call_id=run_id, live_signal=live))
                 decisions.append(result)
                 state.set_commercial_state(result.outcome.value)
 
+                # All of this already happened inside agent.run() above (it's one
+                # blocking call) -- there's no mid-call hook to emit "running" as it
+                # actually starts each step. Replaying running->done pairs here in
+                # the real order, using each step's real measured duration, is what
+                # makes the paced reveal queue (see app.js) show the same "this is
+                # in progress now" feel for these steps as it does for STT/sentiment
+                # above, which *do* have a real running state. The duration shown
+                # once "done" reveals is the real figure either way.
+                evidence_by_kind: dict[str, list] = {}
+                for e in result.evidence:
+                    evidence_by_kind.setdefault(e.kind, []).append(e)
+
+                def emit_decision_stage(stage: str, ms: float, detail: dict | None = None) -> None:
+                    iid = stage_start(stage)
+                    clean = {k: v for k, v in (detail or {}).items() if v} or None
+                    seq.emit("pipeline.stage", {"stage": stage, "status": "done", "instance_id": iid,
+                                                 "ms": round(ms, 1), **({"detail": clean} if clean else {})})
+
                 gate_ms = sum(s["duration_ms"] for s in result.spans if s["name"] in _GATE_SPANS)
-                seq.emit("pipeline.stage", {"stage": "gate", "status": "done", "instance_id": uuid.uuid4().hex[:8],
-                                             "ms": round(gate_ms, 1),
-                                             "detail": {"policy_decisions": [d.rule_id for d in result.policy_decisions]}})
+                emit_decision_stage("gate", gate_ms, {
+                    "customer_gates_fired": [d.rule_id for d in result.policy_decisions if d.subject == "customer"] or None,
+                    "product_rules_applied": [f"{d.subject}: {d.rule_id} ({d.outcome})"
+                                               for d in result.policy_decisions if d.subject != "customer"] or None,
+                })
                 for s in result.spans:
                     stage_key = _SPAN_TO_STAGE.get(s["name"])
-                    if stage_key:
-                        seq.emit("pipeline.stage", {"stage": stage_key, "status": "done",
-                                                     "instance_id": uuid.uuid4().hex[:8], "ms": s["duration_ms"]})
-                seq.emit("pipeline.stage", {"stage": "evidence", "status": "done", "instance_id": uuid.uuid4().hex[:8],
-                                             "ms": 0, "detail": {"evidence_count": len(result.evidence)}})
+                    if not stage_key:
+                        continue
+                    detail = None
+                    if stage_key == "ml":
+                        detail = {"model_scored": [f"{c.product_id}: {c.propensity:.2f} ({c.model_name} {c.model_version})"
+                                                    for c in result.candidates]}
+                    elif stage_key == "search":
+                        hits = evidence_by_kind.get("guidance_chunk", [])
+                        detail = {"matched_guidance": [f"{e.source_id} v{e.source_version} -- {e.detail}" for e in hits]
+                                   if hits else ["no approved guidance matched -- no recommendation will cite one"]}
+                    elif stage_key == "narrator":
+                        llm_ev = evidence_by_kind.get("llm")
+                        if llm_ev:
+                            detail = {"prompt_profile": llm_ev[0].source_id, "validation": llm_ev[0].detail}
+                    emit_decision_stage(stage_key, s["duration_ms"], detail)
+                emit_decision_stage("evidence", 0, {
+                    "evidence_collected": [f"{k} ×{len(v)}" for k, v in evidence_by_kind.items()],
+                })
 
                 seq.emit(DECISION_MADE, {
                     "outcome": result.outcome.value,
