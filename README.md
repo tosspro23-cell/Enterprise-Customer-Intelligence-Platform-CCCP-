@@ -111,30 +111,42 @@ assumption rather than confirming it:
 | Deployment | Role tested | Result |
 |---|---|---|
 | `gpt-5-mini` (reasoning model) | correctness of the generated explanation | **16/16 eval cases pass, decision accuracy 1.0, 0 policy violations** when given a generous timeout (`--narrator-timeout 20`) -- see `evals/report/eval_report_azure.md`. **Not viable for the real-time profile as configured**: it spends hidden "reasoning tokens" before writing any visible output (~550-650 tokens for this prompt), round-trip latency measured at 7-10.6s against the architecture's 3s real-time budget, and with the real-time profile's lean 400-token budget (docs/architecture.md §9.7) the reasoning alone can exhaust it and return **empty content with no error** -- a silent failure mode a non-reasoning model doesn't have. The agent's validator/timeout/fallback caught every one of these safely; nothing bad ever reached a result. |
-| `gpt-4.1-mini` (non-reasoning model) | real-time latency budget | 3 identical calls measured **2.75s, 4.05s, 12.64s** -- network/provider latency variance alone put one of three calls over even a 3s timeout, which the agent correctly caught and fell back from. |
+| `gpt-4.1-mini` (non-reasoning model) | real-time latency budget | Originally 3 identical calls measured **2.75s, 4.05s, 12.64s** under the SDK's default retry behaviour -- see the re-measurement below, which replaces that number. |
 
-**Caveat on these latency numbers (found in review, not yet re-measured).**
-They were taken with the OpenAI SDK's default `max_retries=2`, and the SDK
-retries timeouts -- so a call could take up to ~3x its timeout plus
-backoff. The 12.64s `gpt-4.1-mini` outlier is consistent with a retried
-timeout rather than (only) provider latency; that is an inference, not
-verified. The adapter now disables retries and enforces the timeout as an
-end-to-end deadline (`AzureOpenAINarrator`, tested with a fake slow
-provider). The figures above should be re-measured (n >= 30) before the
-conclusion below is relied on.
+**Re-measured at n = 30, retries disabled.**
+The 3-sample numbers above were taken with the OpenAI SDK's default
+`max_retries=2`, which retries timeouts -- so a call could take up to ~3x
+its timeout plus backoff, and the 12.64s outlier was suspected to be a
+retried timeout rather than pure provider latency. The adapter now sets
+`max_retries=0` and enforces the timeout as an end-to-end deadline
+(`AzureOpenAINarrator`). Re-run against the real `narrator-realtime-v1`
+(`gpt-4.1-mini`) deployment with retries off, concurrency 1, n = 30:
+`evals/report/loadtest_realtime_n30.json`.
+
+| Stage | n | min | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|---|
+| Narrator (`gpt-4.1-mini`, real-time deployment) | 30 | 2687ms | **3126ms** | 4300ms | 4874ms | 4874ms |
+
+The old 12.64s outlier is gone -- confirming it really was retry-inflated,
+not pure provider latency -- but the cleaner data tells a less comfortable
+story than "mostly fine, one bad outlier": **median latency (3.13s) is
+already past the 3.0s real-time budget**, so more than half of these 30
+clean, retry-free calls would miss a strict 3s deadline, not a rare tail
+case. This sharpens the original conclusion rather than overturning it --
+a pay-as-you-go, non-provisioned `GlobalStandard` deployment does not
+reliably hit a 3-second real-time budget even under good conditions, which
+is still the concrete argument for the provisioned-throughput design in
+§15.2 -- just with an n = 30 number behind it instead of n = 3.
 
 This is exactly the kind of number the architecture doc could only mark
 **[Design]** before (§9.7, §15.2: "decide after the pilot measures actual
-latency" / "provisioned throughput ... decide after the pilot"). It now has
-one real, small and possibly retry-inflated data point: **a pay-as-you-go,
-non-provisioned deployment did not reliably hit a 3-second real-time budget
-in these runs**, which is the concrete argument
-for the provisioned-throughput design in §15.2, not just a theoretical one.
+latency" / "provisioned throughput ... decide after the pilot").
 
 Reproduce: deploy any Azure OpenAI model, set `AZURE_OPENAI_*`, then
 `python evals/run_evals.py --narrator azure --narrator-timeout 20` for
-correctness, or call `CommercialDecisionAgent.run()` directly in a loop with
-a realistic `narrator_timeout_s` to measure latency.
+correctness, or `AZURE_OPENAI_DEPLOYMENT=<deployment> python
+tools/loadtest.py --concurrency 1 --calls-per-level 30 --narrator-timeout
+20` for the latency distribution above.
 
 ## Concurrency smoke test against the full real backend stack
 
@@ -343,9 +355,12 @@ Not validated: semantic faithfulness of narrator text beyond what a lexical
 validator can see -- it rejects unsupported numbers (digits and spelled-out
 percentages), other products' names, uncited output and listed prohibited
 phrases, but a paraphrased promise ("you will definitely earn more") still
-passes it; latency or cost at production call volume (tens of
-concurrent calls, not six, which is what the real-time budget in
-docs/architecture.md §9.7 is actually about); a true same-region
+passes it; latency or cost at production call **concurrency** (tens of
+calls running at once competing for the same GlobalStandard quota, not one
+call at a time back-to-back -- narrator latency has now been re-measured
+at n = 30, see above, but only at concurrency 1; that's the dimension
+docs/architecture.md §9.7's real-time budget is actually about and it is
+still open); a true same-region
 deployment (the Container Apps run landed in a different Azure region
 from Redis/AI Search/OpenAI, not the same one -- see the comparison
 section above); Web PubSub; a trained theme classifier (still a keyword
@@ -354,8 +369,7 @@ match, see `sentiment_language.py`); any production integration
 TTS-synthesised audio, real guidance ingestion from SharePoint); the demo
 supervisor router as a stand-in for a real language router; real call
 audio of any kind -- every "call" here is scripted text, optionally
-voiced by TTS, never a live conversation; narrator latency with retries
-disabled and an end-to-end deadline (re-measure at n >= 30 still to do).
+voiced by TTS, never a live conversation.
 
 ## Deliberate deviations from the target security model
 

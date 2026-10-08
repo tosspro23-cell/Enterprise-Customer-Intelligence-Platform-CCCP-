@@ -1,0 +1,55 @@
+{
+  "script": "golden_savings.json",
+  "narrator_timeout_s": 20.0,
+  "levels": [
+    {
+      "concurrency": 1,
+      "calls": 30,
+      "errors": 0,
+      "error_samples": [],
+      "outcomes": {
+        "recommended": 30
+      },
+      "total_call_ms": {
+        "n": 30,
+        "min": 21576.6,
+        "p50": 22654.1,
+        "max": 29213.7,
+        "p95": 26802.8,
+        "p99": 29213.7
+      },
+      "event_publish_ms": {
+        "n": 600,
+        "min": 323.3,
+        "p50": 334.5,
+        "max": 4103.9,
+        "p95": 955.7,
+        "p99": 3878.5
+      },
+      "redis_roundtrip_ms": {
+        "n": 270,
+        "min": 260.9,
+        "p50": 528.8,
+        "max": 7388.9,
+        "p95": 553.3,
+        "p99": 879.5
+      },
+      "narrator_ms": {
+        "n": 30,
+        "min": 2687.1,
+        "p50": 3125.8,
+        "max": 4874.0,
+        "p95": 4299.7,
+        "p99": 4874.0
+      },
+      "guidance_search_ms": {
+        "n": 30,
+        "min": 1374.3,
+        "p50": 1463.6,
+        "max": 1842.6,
+        "p95": 1723.2,
+        "p99": 1842.6
+      }
+    }
+  ]
+}
