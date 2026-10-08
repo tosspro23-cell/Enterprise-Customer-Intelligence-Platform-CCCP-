@@ -250,24 +250,23 @@ button:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 900px) { .call-layout { grid-template-columns: 1fr; } }
 .call-layout .transcript-panel,
 .call-right-col { height: 100%; min-height: 420px; display: flex; flex-direction: column; min-width: 0; }
-.call-right-col { gap: 14px; }
-/* Content-driven, not a bare fixed box: a one-line suppressed/deferred card
-   and a full narrator paragraph with evidence shouldn't get the same height.
-   It still never causes the page to reflow -- growth is capped (see the
-   max-height below) and anything past that scrolls inside the panel, same
-   as before; the cap just moved from "230px always" to "most of the column,
-   only when content actually needs it" so the single most important text in
-   the demo doesn't require a scroll to read at a normal screen size. */
-.call-right-col .decision-summary { flex: 0 1 auto; }
-.call-right-col .trace-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; }
+.call-right-col { gap: 0; }
+/* A manual split, not content-driven: Outcome's height is whatever the
+   viewer last dragged it to (restored from localStorage by the resizer
+   script), full stop -- it never grows or shrinks on its own as a call
+   plays out and more decisions append, so Trace's share of the column never
+   shifts out from under whoever's reading it. Both panels keep their own
+   internal scroll past that fixed height, same as before. */
+.call-right-col .decision-summary { flex: 0 0 auto; height: 360px; overflow-y: auto; }
+.call-right-col .trace-panel { flex: 1; min-height: 120px; display: flex; flex-direction: column; min-width: 0; }
+
+/* The drag handle living between them. A few pixels tall with a visible
+   "grip" pill so it reads as draggable, not as a stray gap. */
+.panel-resizer { flex-shrink: 0; height: 14px; margin: 0 -4px; cursor: row-resize; display: flex; align-items: center; justify-content: center; touch-action: none; }
+.panel-resizer::before { content: ""; width: 36px; height: 3px; border-radius: 999px; background: var(--border); transition: background 0.15s; }
+.panel-resizer:hover::before, .panel-resizer.dragging::before { background: var(--accent); }
 
 .sub-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
-
-/* Transcript/trace stay fixed-and-scroll-internally (the whole point of this
-   layout -- see the comment on .call-layout above); Outcome instead grows
-   with its content up to a generous cap, so the common case (one or two
-   decisions) shows its full text with no scrolling at all. */
-.decision-summary { max-height: 58%; min-height: 280px; overflow-y: auto; }
 #transcript { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .bubble { max-width: 85%; padding: 7px 11px; border-radius: 10px; line-height: 1.4; }
 .bubble.customer { background: var(--chip); align-self: flex-start; }
@@ -305,6 +304,12 @@ button:disabled { opacity: 0.5; cursor: default; }
   padding: 4px 10px 4px 8px; border-radius: 999px; background: var(--chip); border: 1px solid var(--border);
 }
 .decision-trigger::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+/* A repeat trigger (trigger.py re-checked and landed on the same outcome
+   again) gets its own line under the main row -- flex-basis:100% forces the
+   wrap -- and a quieter, dashed look: it's provenance/audit detail, not a
+   new fact to weigh equally against the banner above it. */
+.decision-trigger-repeat { flex: 1 1 100%; margin-top: 2px; font-size: 10.5px; background: transparent; border-style: dashed; }
+.decision-trigger-repeat::before { background: var(--muted); }
 
 /* Policy rules as scannable chips rather than a bullet list -- several short
    facts read faster side by side than stacked one per line. */
@@ -356,16 +361,34 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
   100% { transform: scale(2.2); opacity: 0; }
 }
 
+/* The scrolling viewport. It does NOT hold the rail -- an absolutely
+   positioned element stretches to ITS containing block's own height, which
+   for a scrolling flex item is the visible viewport, not the full scrollable
+   content. .trace-timeline-inner (plain, auto-height, not scrolling) is what
+   the rail actually stretches against, so it reaches exactly as far as the
+   real content does, however long that grows. */
 .trace-timeline {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 2px;
+}
+.trace-timeline-inner { position: relative; display: flex; flex-direction: column; gap: 4px; }
+
+/* One continuous line behind every step's dot and every divider, instead of
+   each row drawing its own segment -- the previous approach left a visible
+   gap at every flex `gap` and every divider's margin, which read as broken,
+   not as one smooth thread. left:17px lines up with the dot's actual center
+   (1px .trace-step border + 8px header padding + half of the 16px icon),
+   measured directly rather than eyeballed. Soft fade at both ends reads as
+   deliberate framing rather than an abrupt cut; z-index:0 keeps it behind
+   every dot (each dot is z-index:1, see .step-icon-core) without needing any
+   particular DOM order relative to the rows themselves. */
+.timeline-rail {
+  position: absolute; left: 17px; top: 0; bottom: 0; width: 2px; z-index: 0; pointer-events: none;
+  background: linear-gradient(to bottom, transparent 0, var(--border) 16px, var(--border) calc(100% - 16px), transparent 100%);
 }
 
 .timeline-divider {
@@ -383,27 +406,8 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 .timeline-divider.kind-decision { color: var(--accent); }
 .timeline-divider.kind-decision::before, .timeline-divider.kind-decision::after { background: var(--accent); opacity: 0.4; }
 .timeline-divider-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; }
-/* The reasoning thread (see .trace-step::before) keeps running through a
-   turn/decision divider too -- a real element, not ::before/::after, which
-   the divider's own tick marks above already use. */
-.timeline-thread { position: absolute; left: 12px; top: 0; bottom: 0; width: 1.5px; background: var(--border); }
 
-/* A continuous vertical thread through every node's dot -- including across
-   turn/decision dividers (.timeline-thread below) -- so the whole feed
-   reads as one ongoing chain of reasoning, not a stack of unrelated cards.
-   Each node draws its own segment (::before, so it paints behind the
-   dot/header content) spanning its own box's full height; consecutive
-   boxes' segments meet exactly at the shared edge in normal document flow. */
-.trace-step { position: relative; flex-shrink: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; }
-.trace-step::before {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: 0;
-  bottom: 0;
-  width: 1.5px;
-  background: var(--border);
-}
+.trace-step { flex-shrink: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; }
 .trace-step.expanded { border-color: var(--border); background: var(--bg); box-shadow: 0 2px 14px rgba(0,0,0,0.18); }
 .trace-step.expanded.status-running { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 4px 18px color-mix(in srgb, var(--accent) 28%, transparent); }
 .trace-step.expanded.status-error { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }

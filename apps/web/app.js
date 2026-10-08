@@ -5,6 +5,12 @@ const sentimentFillEl = document.getElementById("sentiment-fill");
 const themesEl = document.getElementById("themes");
 const statusAreaEl = document.getElementById("status-area");
 const traceTimelineEl = document.getElementById("trace-timeline");
+// The scrolling viewport (traceTimelineEl) and the content it scrolls
+// (traceTimelineInnerEl) are deliberately different elements: the inner one
+// is a plain auto-height box so the absolutely-positioned .timeline-rail
+// inside it can stretch top-to-bottom of the *full* content, not just the
+// visible viewport -- see clearTraceRows() for why resets don't touch it.
+const traceTimelineInnerEl = document.getElementById("trace-timeline-inner");
 const logEl = document.getElementById("log");
 const answerEl = document.getElementById("answer");
 const quickEl = document.getElementById("quick");
@@ -67,6 +73,14 @@ const STAGE_CATALOG = {
 };
 
 function clearChildren(el) { el.innerHTML = ""; }
+// Like clearChildren, but for traceTimelineInnerEl specifically: innerHTML=""
+// would also delete .timeline-rail (the continuous connector line), which
+// has to survive every reset/clear since it isn't re-created afterwards.
+function clearTraceRows() {
+  for (const child of [...traceTimelineInnerEl.children]) {
+    if (!child.classList.contains("timeline-rail")) child.remove();
+  }
+}
 // Anything that came from the server (LLM narrator output, transcripts, stored
 // records) is data: escape it before it goes anywhere near innerHTML.
 function esc(v) {
@@ -100,12 +114,14 @@ function resetPanels() {
   statusAreaEl.innerHTML = "";
   statusAreaEl.appendChild(emptySpan("No decision yet."));
   currentDecisionCard = null;
+  lastDecisionSignature = null;
+  suppressNextSuggestion = false;
   logEl.innerHTML = "";
   stageRecords = {};
   timelineRowsById = {};
   expandedInstanceId = null;
-  clearChildren(traceTimelineEl);
-  traceTimelineEl.appendChild(emptySpan("Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows."));
+  clearTraceRows();
+  traceTimelineInnerEl.appendChild(emptySpan("Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows."));
   resetProfile();
 }
 
@@ -190,7 +206,42 @@ function updateThemes(active) {
 // narrator's explanation, so the two stay visually grouped.
 let currentDecisionCard = null;
 
+// The trigger engine is genuinely live (trigger.py) -- it can check in
+// again later and land on the exact same outcome for the exact same
+// reasons (e.g. still RECOMMENDED, still Travel Insurance, nothing about
+// eligibility changed). That's correct behaviour, not a bug, but rendering
+// it as a second full card -- same banner, same chips, same paragraph --
+// reads as a duplicate/glitch to anyone watching. lastDecisionSignature
+// lets updateDecision recognise a repeat and fold it into the existing
+// card instead of stacking an identical one underneath it.
+let lastDecisionSignature = null;
+let suppressNextSuggestion = false;
+
+function decisionSignature(payload) {
+  const key = (payload.policy_decisions || [])
+    .map((d) => (typeof d === "string" ? d : `${d.subject}:${d.rule_id}:${d.outcome}`))
+    .sort().join("|");
+  return `${payload.outcome}::${key}`;
+}
+
 function updateDecision(payload) {
+  const signature = decisionSignature(payload);
+  if (currentDecisionCard && signature === lastDecisionSignature) {
+    const head = currentDecisionCard.querySelector(".decision-head");
+    if (head && payload.trigger_reason) {
+      const again = document.createElement("span");
+      again.className = "decision-trigger decision-trigger-repeat";
+      again.textContent = `reconfirmed — triggered: ${payload.trigger_reason}`;
+      again.title = "The rule engine checked in again and reached the same outcome for the same reasons -- noted here instead of duplicating the card below";
+      head.appendChild(again);
+    }
+    statusAreaEl.scrollTop = statusAreaEl.scrollHeight;
+    suppressNextSuggestion = true;
+    return;
+  }
+  lastDecisionSignature = signature;
+  suppressNextSuggestion = false;
+
   if (statusAreaEl.querySelector(".empty")) clearChildren(statusAreaEl);
   const outcome = payload.outcome;
   const card = document.createElement("div");
@@ -248,6 +299,11 @@ function updateDecision(payload) {
 }
 
 function showSuggestion(payload) {
+  // Set by updateDecision() when this decision was a repeat of the last one
+  // (same outcome, same rules) -- it already noted the re-check inline, so
+  // the guidance paragraph (which would just repeat the one already shown)
+  // is skipped rather than duplicated.
+  if (suppressNextSuggestion) { suppressNextSuggestion = false; return; }
   const target = currentDecisionCard || statusAreaEl;
   const block = document.createElement("div");
   // Outcome-colored left border (status-${outcome} on the parent card, read
@@ -366,18 +422,15 @@ function renderDetailList(container, detail) {
 // so like each node's "running" state it's browser-only, not published.
 // It shows up in the compact timeline as a small divider between nodes.
 function handleGroup(p) {
-  if (traceTimelineEl.querySelector(".empty")) clearChildren(traceTimelineEl);
+  if (traceTimelineInnerEl.querySelector(".empty")) clearTraceRows();
   const div = document.createElement("div");
   div.className = `timeline-divider kind-${p.kind}`;
   div.title = p.label;
-  const thread = document.createElement("span");
-  thread.className = "timeline-thread";  // keeps the reasoning-chain line running through the divider
-  div.appendChild(thread);
   const label = document.createElement("span");
   label.className = "timeline-divider-label";
   label.textContent = p.label;
   div.appendChild(label);
-  traceTimelineEl.appendChild(div);
+  traceTimelineInnerEl.appendChild(div);
   traceTimelineEl.scrollTop = traceTimelineEl.scrollHeight;
 }
 
@@ -457,10 +510,10 @@ function renderStep(instanceId) {
 }
 
 function addTraceStep(instanceId) {
-  if (traceTimelineEl.querySelector(".empty")) clearChildren(traceTimelineEl);
+  if (traceTimelineInnerEl.querySelector(".empty")) clearTraceRows();
   const step = document.createElement("div");
   step.className = "trace-step";
-  traceTimelineEl.appendChild(step);
+  traceTimelineInnerEl.appendChild(step);
   timelineRowsById[instanceId] = step;
   return step;
 }
@@ -1054,8 +1107,55 @@ function renderReplay(events) {
   if (!svDetailEl.children.length) svDetailEl.appendChild(emptySpan("Nothing to show for this call."));
 }
 
+// Manual Outcome/Trace split (the viewer's own call, see index.html's
+// comment on #outcome-resizer) -- plain pointer-drag on decision-summary's
+// height; trace-panel's flex:1 picks up whatever's left, so dragging one
+// never has to touch the other's styling directly.
+function setupOutcomeResizer() {
+  const resizer = document.getElementById("outcome-resizer");
+  const panel = document.querySelector(".call-right-col .decision-summary");
+  const col = document.querySelector(".call-right-col");
+  if (!resizer || !panel || !col) return;
+  const STORAGE_KEY = "cccp.outcomePanelHeightPx";
+  const MIN_H = 120;                 // enough for the banner + one chip row
+  const TRACE_FLOOR = 120;           // trace-panel must always keep this much
+
+  function clampAndApply(h) {
+    const colH = col.getBoundingClientRect().height;
+    const maxH = Math.max(MIN_H, colH - resizer.getBoundingClientRect().height - TRACE_FLOOR);
+    const clamped = Math.max(MIN_H, Math.min(h, maxH));
+    panel.style.height = `${clamped}px`;
+    return clamped;
+  }
+
+  const saved = parseFloat(localStorage.getItem(STORAGE_KEY) || "");
+  if (!Number.isNaN(saved)) clampAndApply(saved);
+
+  let dragging = false, startY = 0, startH = 0;
+  resizer.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    resizer.classList.add("dragging");
+    startY = e.clientY;
+    startH = panel.getBoundingClientRect().height;
+    resizer.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizer.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const applied = clampAndApply(startH + (e.clientY - startY));
+    localStorage.setItem(STORAGE_KEY, String(applied));
+  });
+  const endDrag = () => { dragging = false; resizer.classList.remove("dragging"); };
+  resizer.addEventListener("pointerup", endDrag);
+  resizer.addEventListener("pointercancel", endDrag);
+  // The column's own height depends on the viewport -- a saved height from a
+  // taller window could leave trace-panel with nothing on a smaller one.
+  window.addEventListener("resize", () => clampAndApply(panel.getBoundingClientRect().height));
+}
+
 scrubDemoTokenFromUrl();
 resetPanels();
 loadMode();
 loadScripts();
 setupAssistant();
+setupOutcomeResizer();

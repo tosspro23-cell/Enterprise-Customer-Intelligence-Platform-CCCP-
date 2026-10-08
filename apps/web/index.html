@@ -77,6 +77,11 @@
       <div id="status-area"><span class="empty">Run a call to see the commercial decision here.</span></div>
     </section>
 
+    <!-- Drag to trade space between Outcome and the trace below -- deliberately
+         manual, not auto-grow: the two panels' split is the viewer's call, not
+         something that should shift under them as a call plays out. -->
+    <div class="panel-resizer" id="outcome-resizer" title="Drag to resize"></div>
+
     <!-- Engineering-facing pipeline trace: a running step is expanded in
          full (what it's doing, why, the real data it touched); once the
          call moves on, that step collapses to a one-line summary and the
@@ -84,7 +89,10 @@
          step by step, not a flat log. -->
     <section class="panel trace-panel">
       <h2>Pipeline trace <span class="hint">the current step in full; past steps collapse to a summary</span></h2>
-      <div id="trace-timeline" class="trace-timeline"><span class="empty">Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows.</span></div>
+      <div id="trace-timeline" class="trace-timeline"><div id="trace-timeline-inner" class="trace-timeline-inner">
+        <div class="timeline-rail"></div>
+        <span class="empty">Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows.</span>
+      </div></div>
     </section>
   </div>
 </div>
