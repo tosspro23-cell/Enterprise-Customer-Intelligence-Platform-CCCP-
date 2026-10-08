@@ -28,12 +28,18 @@ const profileChipsEl = document.getElementById("profile-chips");
 // a call run shouldn't have to go read those to understand what they're
 // looking at.
 const STAGE_CATALOG = {
-  stt: { code: "STT", label: "Speech-to-Text", system: "Azure AI Speech", source: "cloud",
+  // source: "demo" (not "cloud"): the API calls are real, but the whole
+  // synthesis/transcription round trip itself has no production equivalent
+  // -- a real call gets its transcript directly from the telephony
+  // platform's live stream (e.g. Genesys AudioHook), never synthesises
+  // audio to re-recognise it. This exists purely so the voice path can be
+  // exercised without a real phone line; see STAGE_CATALOG_SOURCE_LABEL.
+  stt: { code: "STT", label: "Speech-to-Text", system: "Azure AI Speech", source: "demo",
     business: "Turns the customer's spoken words into text the system can act on.",
-    technical: "Real-time streaming STT (PushAudioInputStream). Audio is synthesised by Azure TTS for this demo -- there is no live phone call behind it." },
-  tts: { code: "TTS", label: "Agent Voice Synthesis", system: "Azure AI Speech", source: "cloud",
+    technical: "Real-time streaming STT (PushAudioInputStream), a real Azure call. In production this text comes directly from the telephony platform's live stream (e.g. Genesys AudioHook) -- no synthesis step exists there at all; TTS only appears here because there is no real phone call to test the STT leg against." },
+  tts: { code: "TTS", label: "Agent Voice Synthesis", system: "Azure AI Speech", source: "demo",
     business: "Turns the agent's scripted line into audio so it can be played back.",
-    technical: "Azure neural TTS (speak_text_async), a different voice than the customer's. Not re-transcribed -- there's no live mic input to verify the agent's side against." },
+    technical: "Azure neural TTS (speak_text_async), a real Azure call -- but synthesising the AGENT's voice has no production equivalent at all; a real agent's voice is just their voice. Exists here only so the demo's voice playback has two sides, not one." },
   sentiment: { code: "SENT", label: "Sentiment Scoring", system: "Azure AI Language", source: "cloud",
     business: "Scores how positive or negative the customer sounds, right now.",
     technical: "analyze_sentiment API; positive_confidence minus negative_confidence, mapped to [-1, 1]." },
@@ -328,6 +334,9 @@ function handleGroup(p) {
   const div = document.createElement("div");
   div.className = `timeline-divider kind-${p.kind}`;
   div.title = p.label;
+  const thread = document.createElement("span");
+  thread.className = "timeline-thread";  // keeps the reasoning-chain line running through the divider
+  div.appendChild(thread);
   const label = document.createElement("span");
   label.className = "timeline-divider-label";
   label.textContent = p.label;
@@ -402,6 +411,7 @@ function renderStep(instanceId) {
       <span class="step-icon"><span class="step-icon-core"></span></span>
       <span class="trace-step-code">${meta.code}</span>
       <span class="trace-step-name">${esc(meta.label || rec.stage)}</span>
+      ${meta.source === "demo" ? '<span class="trace-step-demo-badge" title="A real Azure call, but this whole step has no production equivalent -- see the expanded detail.">demo bridge</span>' : ""}
       <span class="trace-step-status${rec.replayed ? " replayed" : ""}" title="${rec.replayed ? "Replayed from the agent trace after the decision completed; durations are real" : ""}">${rec.status === "running" ? "thinking…" : rec.status}</span>
       <span class="trace-step-ms">${ms !== null ? ms.toFixed(0) + " ms" : ""}</span>
     </button>
