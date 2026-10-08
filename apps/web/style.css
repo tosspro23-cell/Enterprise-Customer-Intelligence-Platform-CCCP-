@@ -112,8 +112,7 @@ header h1 { font-size: 16px; margin: 0; }
 .scenario-tag { font-size: 9px; font-weight: 700; letter-spacing: 0.02em; padding: 2px 5px; border-radius: 4px; color: #fff; flex-shrink: 0; }
 .scenario-row-text { min-width: 0; }
 .scenario-customer { font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace; display: block; }
-.scenario-title { font-size: 11.5px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.scenario-row:hover .scenario-title, .scenario-row.running .scenario-title { white-space: normal; overflow: visible; }
+.scenario-title { font-size: 11.5px; line-height: 1.3; white-space: normal; }
 button {
   font: inherit;
   padding: 7px 14px;
@@ -198,7 +197,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   align-items: stretch;
 }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
-.split .panel { display: flex; flex-direction: column; height: 610px; }
+.split .panel { display: flex; flex-direction: column; height: 610px; min-width: 0; }
 
 .sub-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
 
@@ -206,31 +205,45 @@ button:disabled { opacity: 0.5; cursor: default; }
    whole point is that the Outcome/transcript/trace panels hold still while a
    call progresses instead of the page reflowing under you as content
    appears. */
-.decision-summary { height: 150px; overflow-y: auto; }
+.decision-summary { height: 230px; overflow-y: auto; }
 #transcript { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .bubble { max-width: 85%; padding: 7px 11px; border-radius: 10px; line-height: 1.4; }
 .bubble.customer { background: var(--chip); align-self: flex-start; }
 .bubble.agent { background: var(--accent); color: #fff; align-self: flex-end; }
 .bubble .ch { display: block; font-size: 10px; opacity: 0.7; margin-bottom: 2px; text-transform: uppercase; }
 
+.sentiment-label { font-size: 11px; color: var(--muted); display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.sentiment-label .hint { font-style: italic; opacity: 0.8; }
 .sentiment-value { font-size: 24px; font-weight: 600; }
 .sentiment-bar { height: 8px; border-radius: 4px; background: var(--chip); margin: 8px 0 12px; overflow: hidden; }
 .sentiment-bar > div { height: 100%; border-radius: 4px; transition: width 0.3s, background 0.3s; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--chip); border: 1px solid var(--border); }
 
-.status-banner { padding: 10px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 10px; display: inline-block; }
+/* Each decision (a call can produce more than one -- e.g. deferred, then
+   later recommended) is its own card, stacked in order. The panel above is
+   fixed-height with its own scroll, so the newest card is auto-scrolled
+   into view (the key moment) while earlier ones stay reachable above it. */
+.decision-card { padding: 10px 0; border-bottom: 1px dashed var(--border); }
+.decision-card:first-child { padding-top: 0; }
+.decision-card:last-child { border-bottom: none; padding-bottom: 0; }
+.status-banner { padding: 10px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 8px; display: inline-block; }
 .status-recommended { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .status-suppressed { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
 .status-deferred { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .status-specialist_handoff { background: color-mix(in srgb, var(--handoff) 18%, transparent); color: var(--handoff); }
 .status-unavailable, .status-no_recommendation { background: var(--chip); color: var(--muted); }
 
+.policy-list { font-size: 12px; color: var(--muted); margin: 0 0 6px; padding-left: 18px; }
+.policy-list li { margin: 1px 0; }
+
+.suggestion-block { margin-top: 8px; }
 .suggestion-text { line-height: 1.5; margin: 8px 0; }
 .citelist { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 .gen-badge { font-size: 11px; padding: 2px 7px; border-radius: 999px; }
 .gen-llm { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
 .gen-template { background: var(--chip); color: var(--muted); }
+.narrator-profile { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; margin-left: 8px; }
 details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .evidence-row { font-size: 11px; font-family: ui-monospace, monospace; padding: 2px 0; color: var(--muted); }
 
@@ -244,9 +257,11 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 
 .trace-now {
   flex-shrink: 0;
+  min-width: 0;
   min-height: 160px;
   max-height: 60%;
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
@@ -257,7 +272,7 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 .trace-now.status-error { border-color: var(--bad); }
 .trace-now.idle { display: flex; align-items: center; }
 .trace-now-empty { color: var(--muted); font-size: 12.5px; font-style: italic; }
-.now-head { display: flex; align-items: flex-start; gap: 10px; }
+.now-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 .now-code {
   font-family: ui-monospace, monospace;
   font-size: 12.5px;
@@ -272,11 +287,12 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 }
 .trace-now.source-cloud .now-code { background: var(--cloud); }
 .trace-now.source-local .now-code { background: var(--local); }
-.now-text { flex: 1; min-width: 0; }
+.now-text { flex: 1 1 160px; min-width: 0; }
 .now-label { font-weight: 700; font-size: 14.5px; }
 .now-label .now-system { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
-.now-business { font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+.now-business { font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; overflow-wrap: anywhere; }
 .now-status { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 999px; flex-shrink: 0; }
+.now-status.replayed { border: 1px dashed currentColor; }
 .now-status.status-running { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
 .now-status.status-done { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .now-status.status-error { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); }
@@ -285,23 +301,18 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 .now-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s; }
 .trace-now.source-local .now-bar-fill { background: var(--local); }
 .now-detail { margin-top: 8px; }
-.now-technical { font-size: 11.5px; color: var(--muted); margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); line-height: 1.5; }
+.now-technical { font-size: 11.5px; color: var(--muted); margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); line-height: 1.5; overflow-wrap: anywhere; }
 .now-eh-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
 
-.trace-detail-list { font-size: 11.5px; color: var(--muted); margin: 4px 0 0; padding-left: 16px; }
+.trace-detail-list { font-size: 11.5px; color: var(--muted); margin: 4px 0 0; padding-left: 16px; overflow-wrap: anywhere; }
 .trace-detail-list li { margin: 1px 0; }
-.trace-raw { font-size: 10.5px; background: var(--mono-bg); color: var(--mono-text); padding: 6px 8px; border-radius: 6px; overflow-x: auto; margin: 6px 0 0; }
-
-.trace-timeline {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 4px 2px;
+.trace-raw {
+  font-size: 10.5px; background: var(--mono-bg); color: var(--mono-text); padding: 6px 8px; border-radius: 6px;
+  margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-width: 100%;
 }
+
+/* Used standalone (not a button) by the Supervisor replay view's inline stage
+   chips -- kept separate from the live timeline rows below. */
 .trace-code {
   font-family: ui-monospace, monospace;
   font-size: 10px;
@@ -314,15 +325,66 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
   border: none;
   text-align: center;
 }
-button.trace-code { cursor: pointer; opacity: 0.55; transition: opacity 0.2s; }
-button.trace-code:hover { opacity: 0.85; }
-button.trace-code.source-cloud { background: var(--cloud); }
-button.trace-code.source-local { background: var(--local); }
-button.trace-code.status-running { opacity: 1; animation: pulse 1.2s ease-in-out infinite; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
-button.trace-code.status-done { opacity: 0.85; }
-button.trace-code.status-error { background: var(--bad); opacity: 1; }
-.timeline-divider { width: 1px; align-self: stretch; background: var(--border); flex-shrink: 0; margin: 0 4px; }
-.timeline-divider.kind-decision { background: var(--accent); width: 2px; }
+
+/* A vertical, bottom-anchored feed (like the transcript): new nodes append at
+   the bottom and the view auto-scrolls down to them, older ones scroll up
+   and out of view. Fixed width, no horizontal scroll ever -- this is what
+   replaced a horizontally-scrolling chip strip, which could force the whole
+   panel wider than its grid column and squeeze the transcript next to it. */
+.trace-timeline {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px;
+}
+.timeline-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 2px;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.timeline-divider:first-child { margin-top: 2px; }
+.timeline-divider::before, .timeline-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); min-width: 8px; }
+.timeline-divider.kind-decision { color: var(--accent); }
+.timeline-divider.kind-decision::before, .timeline-divider.kind-decision::after { background: var(--accent); opacity: 0.4; }
+.timeline-divider-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; }
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.timeline-row:hover { background: var(--chip); }
+.timeline-row.is-selected { border-color: var(--border); background: var(--chip); }
+.timeline-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--local); }
+.timeline-row.source-cloud .timeline-dot { background: var(--cloud); }
+.timeline-row.source-local .timeline-dot { background: var(--local); }
+.timeline-row.status-running { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.timeline-row.status-running .timeline-dot { animation: pulse 1.2s ease-in-out infinite; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+.timeline-row.status-error .timeline-dot { background: var(--bad); }
+.timeline-row.status-error .timeline-row-meta { color: var(--bad); }
+.timeline-row-label { flex: 1; min-width: 0; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.timeline-row-label .timeline-row-name { color: var(--muted); font-weight: 400; margin-left: 5px; }
+.timeline-row-meta { flex-shrink: 0; font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 
 #log-wrap { margin: 14px 20px 0; }
 #log-wrap summary { font-size: 12px; color: var(--muted); cursor: pointer; }

@@ -45,7 +45,8 @@ def build_enrichment(state: CallState, decisions: list[DecisionResult]) -> Enric
 
     trend_bits = []
     if state.sentiment_series:
-        trend_bits.append(f"sentiment moved {state.sentiment_series[0]:+.2f} -> {state.sentiment_series[-1]:+.2f}")
+        trend_bits.append(f"first -> last utterance sentiment: {state.sentiment_series[0]:+.2f} -> "
+                          f"{state.sentiment_series[-1]:+.2f}")
     if state.active_themes:
         trend_bits.append(f"themes: {', '.join(state.active_themes)}")
     if last:

@@ -18,12 +18,64 @@ from datetime import date
 from typing import Any, Callable
 
 from cccp_agent import CommercialDecisionAgent, DecisionRequest, DecisionResult, LiveCallSignal
+from cccp_agent.narrative import readable_policy_decisions
 
 from .call_state import CallState, update_sentiment, update_themes
 from .events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, EventSequencer, SENTIMENT_UPDATED,
                       SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
 
 TURN_DELAY_S = 0.55   # paced for a human to follow in the demo UI; not a latency claim
+
+# Same rollup cloud_workbench_server.py uses: the agent's own spans (real,
+# even here -- just in-process and synchronous, not network calls) collapsed
+# into the stage vocabulary the Workbench's trace panel already knows. Local
+# mode has no STT/TTS/sentiment/redis stages (none of those run here) --
+# only the decision itself, so the panel isn't empty, just shorter.
+_GATE_SPANS = {"get_customer", "get_interactions", "analyse", "customer_gates"}
+_SPAN_TO_STAGE = {"score_products": "ml", "search_guidance": "search", "narrator_explain": "narrator"}
+
+
+def _emit_decision_stages(seq: EventSequencer, result: DecisionResult) -> None:
+    """Everything here already happened inside the one blocking agent.run()
+    call above -- there's no mid-call hook to emit "running" as each step
+    actually starts, so (like the cloud Workbench) these are replayed as
+    done-only stages using each step's real measured duration, right after
+    the decision lands."""
+    evidence_by_kind: dict[str, list] = {}
+    for e in result.evidence:
+        evidence_by_kind.setdefault(e.kind, []).append(e)
+
+    def emit_stage(stage: str, ms: float, detail: dict | None = None) -> None:
+        clean = {k: v for k, v in (detail or {}).items() if v} or {}
+        clean["timing_source"] = ["agent's own trace, replayed after the decision (real, in-process "
+                                  "durations -- no network call in local mode)"]
+        seq.emit("pipeline.stage", {"stage": stage, "status": "done", "instance_id": uuid.uuid4().hex[:8],
+                                     "ms": round(ms, 1), "replayed": True, "local": True, "detail": clean})
+
+    gate_ms = sum(s["duration_ms"] for s in result.spans if s["name"] in _GATE_SPANS)
+    emit_stage("gate", gate_ms, {
+        "customer_gates_fired": [d.rule_id for d in result.policy_decisions if d.subject == "customer"] or None,
+        "product_rules_applied": [f"{d.subject}: {d.rule_id} ({d.outcome})"
+                                   for d in result.policy_decisions if d.subject != "customer"] or None,
+    })
+    for s in result.spans:
+        stage_key = _SPAN_TO_STAGE.get(s["name"])
+        if not stage_key:
+            continue
+        detail = None
+        if stage_key == "ml":
+            detail = {"model_scored": [f"{c.product_id}: {c.propensity:.2f} ({c.model_name} {c.model_version})"
+                                        for c in result.candidates]}
+        elif stage_key == "search":
+            hits = evidence_by_kind.get("guidance_chunk", [])
+            detail = {"matched_guidance": [f"{e.source_id} v{e.source_version} -- {e.detail}" for e in hits]
+                       if hits else ["no approved guidance matched -- no recommendation will cite one"]}
+        elif stage_key == "narrator":
+            llm_ev = evidence_by_kind.get("llm")
+            detail = {"explanation_by": [result.explanation.generated_by],
+                       "validation": [llm_ev[0].detail] if llm_ev else None}
+        emit_stage(stage_key, s["duration_ms"], detail)
+    emit_stage("evidence", 0, {"evidence_collected": [f"{k} ×{len(v)}" for k, v in evidence_by_kind.items()]})
 
 
 def run_call(
@@ -77,9 +129,11 @@ def run_call(
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
         decisions.append(result)
         state.commercial_state = result.outcome.value
+        seq.emit("pipeline.group", {"kind": "decision", "label": "Commercial decision triggered"})
+        _emit_decision_stages(seq, result)
         seq.emit(DECISION_MADE, {
             "outcome": result.outcome.value,
-            "policy_decisions": [d.rule_id for d in result.policy_decisions],
+            "policy_decisions": readable_policy_decisions(result.policy_decisions, agent.catalog),
             "degraded": list(result.degraded),
             "trace_id": result.trace_id,
         })

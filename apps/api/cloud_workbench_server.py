@@ -54,6 +54,7 @@ AGENT_VOICE = "en-US-GuyNeural"
 from cccp_agent import CommercialDecisionAgent, DecisionRequest, LiveCallSignal  # noqa: E402
 from cccp_agent.adapters.azure_openai import AzureOpenAINarrator  # noqa: E402
 from cccp_agent.adapters.synthetic import SyntheticEstate  # noqa: E402
+from cccp_agent.narrative import readable_policy_decisions  # noqa: E402
 from cccp_platform import assistant as assistant_mod  # noqa: E402
 from cccp_platform.azure_backends.event_hub_bus import EventHubSink  # noqa: E402
 from cccp_platform.azure_backends.redis_state import RedisCallState  # noqa: E402
@@ -344,7 +345,7 @@ def start_call(script_id: str) -> str:
 
                 seq.emit(DECISION_MADE, {
                     "outcome": result.outcome.value,
-                    "policy_decisions": [d.rule_id for d in result.policy_decisions],
+                    "policy_decisions": readable_policy_decisions(result.policy_decisions, estate.catalog),
                     "degraded": list(result.degraded),
                     "trace_id": result.trace_id,
                 })
@@ -355,6 +356,8 @@ def start_call(script_id: str) -> str:
                         "cited_document_ids": list(result.explanation.cited_document_ids),
                         "generated_by": result.explanation.generated_by,
                         "evidence": [e.__dict__ for e in result.evidence],
+                        "narrator_profile": f"{NARRATOR_DEPLOYMENT} · {NARRATOR_DEADLINE_S}s deadline"
+                        if NARRATOR_DEPLOYMENT else None,
                     })
 
             state.end()

@@ -58,7 +58,6 @@
 <section class="panel decision-summary" id="decision-summary">
   <h2>Outcome</h2>
   <div id="status-area"><span class="empty">Run a call to see the commercial decision here.</span></div>
-  <div id="suggestion-area"></div>
 </section>
 
 <div class="split">
@@ -67,6 +66,7 @@
     <h2>Call transcript</h2>
     <div id="transcript"><span class="empty">Run a call to see it here.</span></div>
     <div class="sub-panel">
+      <div class="sentiment-label">Rolling sentiment <span class="hint">smoothed across the call so far, not this line's raw score</span></div>
       <div class="sentiment-value" id="sentiment-value">&ndash;</div>
       <div class="sentiment-bar"><div id="sentiment-fill" style="width:50%;background:var(--muted)"></div></div>
       <div class="chips" id="themes"><span class="empty">No themes yet.</span></div>
@@ -78,7 +78,7 @@
   <section class="panel">
     <h2>Pipeline trace <span class="hint">what's happening right now, and where it sits in the chain</span></h2>
     <div id="trace-now" class="trace-now idle">
-      <div class="trace-now-empty">Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on.</div>
+      <div class="trace-now-empty">Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows.</div>
     </div>
     <div id="trace-timeline" class="trace-timeline"><span class="empty">No steps yet.</span></div>
   </section>

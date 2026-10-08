@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .domain import Explanation, GuidanceChunk, Product, ProductScore, SentimentTrend, ThemeInsight
+from .domain import Explanation, GuidanceChunk, PolicyDecision, Product, ProductScore, SentimentTrend, ThemeInsight
 
 PROMPT_PROFILE = "commercial_explanation_v1"
 MAX_CHARS = 600
@@ -200,3 +200,17 @@ def template_explanation(
 def non_offer_explanation(reason: str, rule_id: str) -> Explanation:
     return Explanation(f"No commercial offer now ({rule_id}): {reason}. Prioritise service resolution "
                         f"using the relevant service guidance.", None, (), "template")
+
+
+def readable_policy_decisions(decisions: list[PolicyDecision], catalog: dict[str, Product]) -> list[dict[str, str]]:
+    """Each PolicyDecision already carries a human-written `reason` -- this just
+    resolves `subject` to a name a reader recognises (a product name, or
+    "Customer") instead of a raw id, for a UI to show "Savings Plus -- below
+    threshold (propensity 0.35 < 0.50)" rather than a bare rule_id."""
+    def subject_name(subject: str) -> str:
+        if subject == "customer":
+            return "Customer"
+        product = catalog.get(subject)
+        return product.name if product else subject
+    return [{"subject": subject_name(d.subject), "rule_id": d.rule_id, "outcome": d.outcome, "reason": d.reason}
+            for d in decisions]

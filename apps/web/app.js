@@ -4,7 +4,6 @@ const sentimentValueEl = document.getElementById("sentiment-value");
 const sentimentFillEl = document.getElementById("sentiment-fill");
 const themesEl = document.getElementById("themes");
 const statusAreaEl = document.getElementById("status-area");
-const suggestionAreaEl = document.getElementById("suggestion-area");
 const traceNowEl = document.getElementById("trace-now");
 const traceTimelineEl = document.getElementById("trace-timeline");
 const logEl = document.getElementById("log");
@@ -81,7 +80,7 @@ function logLine(evt) {
 // detail/status/audio), a timeline chip per instance for the compact strip,
 // and which instance the big "now" card is currently showing.
 let stageRecords = {};
-let timelineChipsById = {};
+let timelineRowsById = {};
 let currentNowInstanceId = null;
 
 function resetPanels() {
@@ -95,13 +94,13 @@ function resetPanels() {
   themesEl.appendChild(emptySpan("No themes yet."));
   statusAreaEl.innerHTML = "";
   statusAreaEl.appendChild(emptySpan("No decision yet."));
-  suggestionAreaEl.innerHTML = "";
+  currentDecisionCard = null;
   logEl.innerHTML = "";
   stageRecords = {};
-  timelineChipsById = {};
+  timelineRowsById = {};
   currentNowInstanceId = null;
   traceNowEl.className = "trace-now idle";
-  traceNowEl.innerHTML = '<div class="trace-now-empty">Run a call against LIVE AZURE to see every stage here -- this fills in automatically, nothing to switch on.</div>';
+  traceNowEl.innerHTML = '<div class="trace-now-empty">Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows.</div>';
   clearChildren(traceTimelineEl);
   traceTimelineEl.appendChild(emptySpan("No steps yet."));
   resetProfile();
@@ -180,41 +179,81 @@ function updateThemes(active) {
   }
 }
 
+// A call can produce more than one decision (e.g. deferred on an angry
+// opening, then recommended once resolved) -- each gets its own card,
+// stacked in call order, instead of the latest silently replacing the one
+// before it. currentDecisionCard is where showSuggestion() (which always
+// follows the same decision's commercial.decision_made) attaches the
+// narrator's explanation, so the two stay visually grouped.
+let currentDecisionCard = null;
+
 function updateDecision(payload) {
+  if (statusAreaEl.querySelector(".empty")) clearChildren(statusAreaEl);
   const outcome = payload.outcome;
-  statusAreaEl.innerHTML = "";
+  const card = document.createElement("div");
+  card.className = "decision-card";
+
   const banner = document.createElement("div");
   banner.className = `status-banner status-${outcome}`;
   banner.textContent = outcome.replace(/_/g, " ").toUpperCase();
-  statusAreaEl.appendChild(banner);
-  const rules = document.createElement("div");
-  rules.className = "citelist";
-  rules.textContent = `policy: ${(payload.policy_decisions || []).join(", ") || "(none fired)"}`;
-  statusAreaEl.appendChild(rules);
+  card.appendChild(banner);
+
+  const decisions = payload.policy_decisions || [];
+  const rules = document.createElement("ul");
+  rules.className = "policy-list";
+  if (!decisions.length) {
+    const li = document.createElement("li");
+    li.textContent = "(no policy rule fired)";
+    rules.appendChild(li);
+  }
+  for (const d of decisions) {
+    const li = document.createElement("li");
+    // d is {subject, rule_id, outcome, reason} now; tolerate the older flat
+    // rule_id string shape too, for calls recorded before this changed.
+    li.textContent = typeof d === "string" ? d : `${d.subject} — ${d.reason}`;
+    rules.appendChild(li);
+  }
+  card.appendChild(rules);
+
   if (payload.degraded && payload.degraded.length) {
     const deg = document.createElement("div");
     deg.className = "citelist";
     deg.textContent = `degraded: ${payload.degraded.join(", ")}`;
-    statusAreaEl.appendChild(deg);
+    card.appendChild(deg);
   }
+  statusAreaEl.appendChild(card);
+  statusAreaEl.scrollTop = statusAreaEl.scrollHeight;
+  currentDecisionCard = card;
 }
 
 function showSuggestion(payload) {
-  suggestionAreaEl.innerHTML = "";
+  const target = currentDecisionCard || statusAreaEl;
+  const block = document.createElement("div");
+  block.className = "suggestion-block";
+
   const badge = document.createElement("span");
   badge.className = `gen-badge gen-${payload.generated_by}`;
   badge.textContent = payload.generated_by === "llm" ? "narrator" : "template fallback";
-  suggestionAreaEl.appendChild(badge);
+  block.appendChild(badge);
+
+  // Slide 21 talking point: which deployment produced this, and its
+  // deadline -- only present in cloud mode (see cloud_workbench_server.py).
+  if (payload.narrator_profile) {
+    const prof = document.createElement("span");
+    prof.className = "narrator-profile";
+    prof.textContent = payload.narrator_profile;
+    block.appendChild(prof);
+  }
 
   const text = document.createElement("div");
   text.className = "suggestion-text";
   text.textContent = payload.explanation;
-  suggestionAreaEl.appendChild(text);
+  block.appendChild(text);
 
   const cites = document.createElement("div");
   cites.className = "citelist";
   cites.textContent = `cites: ${(payload.cited_document_ids || []).join(", ") || "none"}`;
-  suggestionAreaEl.appendChild(cites);
+  block.appendChild(cites);
 
   const details = document.createElement("details");
   const summary = document.createElement("summary");
@@ -226,7 +265,10 @@ function showSuggestion(payload) {
     row.textContent = `${e.kind} → ${e.source_system}:${e.source_id}${e.source_version ? "@" + e.source_version : ""} ${e.detail || ""}`;
     details.appendChild(row);
   }
-  suggestionAreaEl.appendChild(details);
+  block.appendChild(details);
+
+  target.appendChild(block);
+  statusAreaEl.scrollTop = statusAreaEl.scrollHeight;
 }
 
 function showPostcall(payload) {
@@ -235,9 +277,22 @@ function showPostcall(payload) {
   banner.style.marginTop = "10px";
   banner.textContent = `post-call record saved — ${payload.summary}`;
   statusAreaEl.appendChild(banner);
+  statusAreaEl.scrollTop = statusAreaEl.scrollHeight;
 }
 
 const TRACE_SCALE_MS = 10000; // bar width reference -- the narrator stage runs several seconds
+
+// In local mode (apps/api/server.py), "search"/"narrator" run against the
+// synthetic in-process stand-ins (SyntheticGuidanceIndex/StubNarrator), not
+// the real Azure AI Search / Azure OpenAI STAGE_CATALOG describes -- a
+// per-event `local: true` flag overrides the catalog entry so the panel
+// says so instead of implying a cloud call that didn't happen.
+function effectiveMeta(stage, isLocal) {
+  const base = STAGE_CATALOG[stage] || { code: stage.slice(0, 5).toUpperCase(), label: stage, system: "",
+                                           source: "local", business: "", technical: "" };
+  if (!isLocal || base.source !== "cloud") return base;  // already local -- nothing to override
+  return { ...base, source: "local", system: `${base.system} (local stand-in)` };
+}
 
 // Most `detail` payloads are now {label: [readable strings]} on purpose
 // (built server-side from real evidence/scores/policy decisions) -- rendered
@@ -276,8 +331,12 @@ function handleGroup(p) {
   const div = document.createElement("div");
   div.className = `timeline-divider kind-${p.kind}`;
   div.title = p.label;
+  const label = document.createElement("span");
+  label.className = "timeline-divider-label";
+  label.textContent = p.label;
+  div.appendChild(label);
   traceTimelineEl.appendChild(div);
-  traceTimelineEl.scrollLeft = traceTimelineEl.scrollWidth;
+  traceTimelineEl.scrollTop = traceTimelineEl.scrollHeight;
 }
 
 // The big "now" card always shows whichever stage instance was most recently
@@ -288,8 +347,12 @@ function handleGroup(p) {
 function renderNowCard(instanceId) {
   const rec = stageRecords[instanceId];
   if (!rec) return;
+  const prevRow = timelineRowsById[currentNowInstanceId];
+  if (prevRow) prevRow.classList.remove("is-selected");
   currentNowInstanceId = instanceId;
-  const meta = STAGE_CATALOG[rec.stage] || { code: rec.stage.slice(0, 5).toUpperCase(), label: rec.stage, system: "", source: "local", business: "", technical: "" };
+  const row = timelineRowsById[instanceId];
+  if (row) row.classList.add("is-selected");
+  const meta = effectiveMeta(rec.stage, rec.local);
   traceNowEl.className = `trace-now source-${meta.source} status-${rec.status}`;
   const ms = typeof rec.ms === "number" ? rec.ms : null;
   traceNowEl.innerHTML = `
@@ -299,7 +362,7 @@ function renderNowCard(instanceId) {
         <div class="now-label">${meta.label}<span class="now-system">${meta.system}</span></div>
         <div class="now-business">${meta.business}</div>
       </div>
-      <span class="now-status status-${rec.status}" title="${rec.replayed ? "Replayed from the agent trace after the decision completed; durations are real" : ""}">${rec.status}${rec.replayed ? " · replayed from trace" : ""}</span>
+      <span class="now-status status-${rec.status}${rec.replayed ? " replayed" : ""}" title="${rec.replayed ? "Replayed from the agent trace after the decision completed; durations are real" : ""}">${rec.status}</span>
       <span class="now-ms">${ms !== null ? ms.toFixed(0) + " ms" : ""}</span>
     </div>
     <div class="now-bar-track"><div class="now-bar-fill" style="width:${ms !== null ? Math.min(100, Math.round((ms / TRACE_SCALE_MS) * 100)) : 0}%"></div></div>
@@ -331,38 +394,46 @@ function renderNowCard(instanceId) {
   }
 }
 
-function addTimelineNode(instanceId, stage) {
+function addTimelineNode(instanceId, stage, isLocal) {
   if (traceTimelineEl.querySelector(".empty")) clearChildren(traceTimelineEl);
-  const meta = STAGE_CATALOG[stage] || { code: stage.slice(0, 5).toUpperCase(), source: "local" };
-  const chip = document.createElement("button");
-  chip.type = "button";
-  chip.className = `trace-code source-${meta.source} status-running`;
-  chip.title = meta.label || stage;
-  chip.textContent = meta.code;
-  chip.addEventListener("click", () => renderNowCard(instanceId));
-  traceTimelineEl.appendChild(chip);
-  timelineChipsById[instanceId] = chip;
-  traceTimelineEl.scrollLeft = traceTimelineEl.scrollWidth;
-  return chip;
+  const meta = effectiveMeta(stage, isLocal);
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = `timeline-row source-${meta.source} status-running`;
+  row.title = meta.label || stage;
+  row.innerHTML = `
+    <span class="timeline-dot"></span>
+    <span class="timeline-row-label">${meta.code}<span class="timeline-row-name">${esc(meta.label || stage)}</span></span>
+    <span class="timeline-row-meta">running&hellip;</span>`;
+  row.addEventListener("click", () => renderNowCard(instanceId));
+  traceTimelineEl.appendChild(row);
+  timelineRowsById[instanceId] = row;
+  traceTimelineEl.scrollTop = traceTimelineEl.scrollHeight;
+  return row;
 }
 
 function handleStage(p) {
-  let chip = timelineChipsById[p.instance_id];
-  if (!chip) chip = addTimelineNode(p.instance_id, p.stage);
+  let row = timelineRowsById[p.instance_id];
+  if (!row) row = addTimelineNode(p.instance_id, p.stage, p.local);
+  const metaEl = row.querySelector(".timeline-row-meta");
 
   if (p.status === "running") {
-    stageRecords[p.instance_id] = { stage: p.stage, status: "running" };
-    chip.className = chip.className.replace(/status-\S+/, "status-running");
+    stageRecords[p.instance_id] = { stage: p.stage, status: "running", local: !!p.local };
+    row.className = row.className.replace(/status-\S+/, "status-running");
+    metaEl.textContent = "running…";
   } else if (p.status === "done") {
     stageRecords[p.instance_id] = { stage: p.stage, status: "done", ms: p.ms, detail: p.detail,
                                      ehMs: p._eh_publish_ms, audioB64: stageRecords[p.instance_id]?.audioB64,
-                                     replayed: !!p.replayed };
-    chip.className = chip.className.replace(/status-\S+/, "status-done");
+                                     replayed: !!p.replayed, local: !!p.local };
+    row.className = row.className.replace(/status-\S+/, "status-done");
+    metaEl.textContent = typeof p.ms === "number" ? `${p.ms.toFixed(0)} ms` : "done";
   } else if (p.status === "error") {
-    stageRecords[p.instance_id] = { stage: p.stage, status: "error", detail: p.detail };
-    chip.className = chip.className.replace(/status-\S+/, "status-error");
+    stageRecords[p.instance_id] = { stage: p.stage, status: "error", detail: p.detail, local: !!p.local };
+    row.className = row.className.replace(/status-\S+/, "status-error");
+    metaEl.textContent = "failed";
   }
   renderNowCard(p.instance_id);
+  traceTimelineEl.scrollTop = traceTimelineEl.scrollHeight;
 }
 
 // -------------------------------------------------------------- paced reveal
@@ -514,6 +585,16 @@ function demoToken() {
   }
 }
 
+// Once the token's stashed in sessionStorage, there's no reason for it to
+// keep sitting in the visible URL / browser history -- scrub it right away.
+function scrubDemoTokenFromUrl() {
+  const url = new URL(location.href);
+  if (!url.searchParams.has("token")) return;
+  demoToken();
+  url.searchParams.delete("token");
+  history.replaceState(null, "", url.pathname + (url.search ? url.search : "") + url.hash);
+}
+
 function showRunRefused(message) {
   hideTypingIndicator();
   playbackBarEl.style.display = "none";
@@ -647,9 +728,20 @@ const SCENARIO_CATEGORY = {
   unknown_and_missing_guidance: { tag: "GOVERNANCE", color: "var(--ok)" },
 };
 
+// Pinned first, in this order, for the architecture-presentation demo flow
+// (slide 9): golden_savings carries both a defer and a later recommend in
+// one call, suppressed_complaint shows the model never being called at all.
+// Everything else keeps the order the API returns it in.
+const PINNED_SCENARIOS = ["golden_savings", "suppressed_complaint"];
+
 async function loadScripts() {
   const resp = await fetch("/api/scripts");
   const scripts = await resp.json();
+  scripts.sort((a, b) => {
+    const ai = PINNED_SCENARIOS.indexOf(a.id), bi = PINNED_SCENARIOS.indexOf(b.id);
+    if (ai === -1 && bi === -1) return 0;
+    return (ai === -1 ? PINNED_SCENARIOS.length : ai) - (bi === -1 ? PINNED_SCENARIOS.length : bi);
+  });
   clearChildren(controls);
   const rows = [];
   for (const s of scripts) {
@@ -838,7 +930,11 @@ function renderReplay(events) {
   transcript.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:12px;";
   const stageList = document.createElement("div");
   stageList.style.cssText = "display:flex;flex-direction:column;gap:4px;";
-  let decisionHtml = "";
+  // A call can carry more than one decision (deferred, then later
+  // recommended) -- each commercial.decision_made starts a new block, and a
+  // following copilot.suggestion_generated attaches to that same block, so
+  // replay shows all of them in order instead of only the last.
+  const decisionBlocks = [];
 
   for (const evt of events) {
     const p = evt.payload || {};
@@ -849,10 +945,13 @@ function renderReplay(events) {
       b.innerHTML = `<span class="ch">${esc(p.channel)}</span>${esc(p.text)}`;
       transcript.appendChild(b);
     } else if (evt.event_type === "commercial.decision_made") {
-      decisionHtml = `<div class="status-banner status-${esc(p.outcome)}" style="margin:10px 0 4px">${esc(p.outcome.replace(/_/g, " ").toUpperCase())}</div>
-        <div class="citelist">policy: ${esc((p.policy_decisions || []).join(", ") || "(none fired)")}</div>`;
+      const rules = (p.policy_decisions || []).map((d) =>
+        typeof d === "string" ? esc(d) : `${esc(d.subject)} — ${esc(d.reason)}`).join("; ") || "(none fired)";
+      decisionBlocks.push(`<div class="status-banner status-${esc(p.outcome)}" style="margin:10px 0 4px">${esc(p.outcome.replace(/_/g, " ").toUpperCase())}</div>
+        <div class="citelist">policy: ${rules}</div>`);
     } else if (evt.event_type === "copilot.suggestion_generated") {
-      decisionHtml += `<div class="suggestion-text">${esc(p.explanation)}</div><div class="citelist">cites: ${esc((p.cited_document_ids || []).join(", ") || "none")}</div>`;
+      const extra = `<div class="suggestion-text">${esc(p.explanation)}</div><div class="citelist">cites: ${esc((p.cited_document_ids || []).join(", ") || "none")}</div>`;
+      if (decisionBlocks.length) decisionBlocks[decisionBlocks.length - 1] += extra;
     } else if (evt.event_type === "pipeline.stage" && p.status === "done") {
       const meta = STAGE_CATALOG[p.stage] || { code: p.stage.toUpperCase(), source: "local" };
       const row = document.createElement("div");
@@ -863,9 +962,9 @@ function renderReplay(events) {
     }
   }
   if (transcript.children.length) svDetailEl.appendChild(transcript);
-  if (decisionHtml) {
+  if (decisionBlocks.length) {
     const d = document.createElement("div");
-    d.innerHTML = decisionHtml;
+    d.innerHTML = decisionBlocks.join('<hr style="border:none;border-top:1px dashed var(--border);margin:10px 0">');
     svDetailEl.appendChild(d);
   }
   if (stageList.children.length) {
@@ -880,6 +979,7 @@ function renderReplay(events) {
   if (!svDetailEl.children.length) svDetailEl.appendChild(emptySpan("Nothing to show for this call."));
 }
 
+scrubDemoTokenFromUrl();
 resetPanels();
 loadMode();
 loadScripts();
