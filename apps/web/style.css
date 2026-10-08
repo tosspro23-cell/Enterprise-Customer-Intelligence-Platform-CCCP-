@@ -36,13 +36,26 @@
 }
 
 * { box-sizing: border-box; }
+html, body { height: 100%; }
+/* The page itself never scrolls: body is exactly one viewport tall, header
+   takes whatever it needs, and the view below it is a flex item that takes
+   the rest. This replaces subtracting a guessed header height from 100vh
+   (fragile -- the header wraps to two lines once the playback bar's text
+   gets long enough, so a fixed px guess drifted and left a few dozen px of
+   page-level scroll). Each view still has overflow-y:auto as a fallback in
+   case its own content doesn't fit even after its internal panels scroll. */
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
+header { flex-shrink: 0; }
+#view-agent, #view-supervisor { flex: 1; min-height: 0; overflow-y: auto; }
 header {
   padding: 10px 20px;
   border-bottom: 1px solid var(--border);
@@ -71,19 +84,20 @@ header h1 { font-size: 16px; margin: 0; }
   color: var(--muted);
   border: 1px solid var(--border);
 }
-/* -------------------------------------------------------------- agent layout */
-.agent-layout { display: flex; align-items: stretch; min-height: calc(100vh - 53px); }
+/* -------------------------------------------------------------- agent layout
+   #view-agent (already flex:1 of body, see above) is itself a flex row:
+   sidebar + main, both stretched to exactly its height. Each scrolls
+   internally on its own -- no position:sticky/max-height math needed once
+   the ancestor chain's heights are all real, not guessed. */
+.agent-layout { display: flex; align-items: stretch; height: 100%; }
 .agent-sidebar {
   width: 240px;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   padding: 14px 12px;
   overflow-y: auto;
-  max-height: calc(100vh - 53px);
-  position: sticky;
-  top: 0;
 }
-.agent-main { flex: 1; min-width: 0; }
+.agent-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .sidebar-heading { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 8px; padding: 0 2px; display: flex; flex-direction: column; gap: 2px; }
 .sidebar-heading .hint { text-transform: none; letter-spacing: normal; font-weight: 400; opacity: 0.8; font-size: 10.5px; }
 @media (max-width: 900px) {
@@ -170,6 +184,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 900px) { .pb-status { display: none; } }
 
 .profile-bar {
+  flex-shrink: 0;
   margin: 16px 20px 0;
   display: flex;
   align-items: center;
@@ -210,21 +225,34 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 /* Agent view: transcript full-height on the left; Outcome (fixed) stacked
    above the pipeline trace (flexes to fill the rest) on the right -- the
-   conclusion sits above the reasoning that produced it. Grid stretch makes
-   the transcript match the right column's height without hard-coding it
-   twice. */
+   conclusion sits above the reasoning that produced it.
+
+   Sizing: .call-layout is a flex:1 child of .agent-main (itself flex:1 of
+   .agent-layout, itself flex:1 of body @ 100vh) -- so it always gets
+   exactly "whatever's left after the header/profile-bar/log-wrap", no
+   matter their actual heights. Grid stretch then makes both columns match
+   that height. The two columns below are height:100% (not min-height) of
+   that -- min-height lets an item grow to fit whatever its content wants,
+   which is exactly how a long trace or transcript used to push the whole
+   page taller and start a page-level scrollbar instead of scrolling inside
+   its own panel. With a real ceiling, only #transcript and #trace-timeline
+   (both min-height:0 + overflow-y:auto) can ever scroll -- the surrounding
+   frame never moves. */
 .call-layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 1fr 1.2fr;
   gap: 14px;
-  padding: 14px 20px 0;
+  padding: 14px 20px 20px;
   align-items: stretch;
 }
 @media (max-width: 900px) { .call-layout { grid-template-columns: 1fr; } }
-.call-layout .transcript-panel { display: flex; flex-direction: column; min-width: 0; }
-.call-right-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.call-layout .transcript-panel,
+.call-right-col { height: 100%; min-height: 420px; display: flex; flex-direction: column; min-width: 0; }
+.call-right-col { gap: 14px; }
 .call-right-col .decision-summary { flex-shrink: 0; }
-.call-right-col .trace-panel { flex: 1; min-height: 610px; display: flex; flex-direction: column; min-width: 0; }
+.call-right-col .trace-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; }
 
 .sub-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
 
@@ -245,7 +273,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .sentiment-bar { height: 8px; border-radius: 4px; background: var(--chip); margin: 8px 0 12px; overflow: hidden; }
 .sentiment-bar > div { height: 100%; border-radius: 4px; transition: width 0.3s, background 0.3s; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--chip); border: 1px solid var(--border); }
+.chip { font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--chip); border: 1px solid var(--border); }
 
 /* Each decision (a call can produce more than one -- e.g. deferred, then
    later recommended) is its own card, stacked in order. The panel above is
@@ -254,12 +282,12 @@ button:disabled { opacity: 0.5; cursor: default; }
 .decision-card { padding: 10px 0; border-bottom: 1px dashed var(--border); }
 .decision-card:first-child { padding-top: 0; }
 .decision-card:last-child { border-bottom: none; padding-bottom: 0; }
-.status-banner { padding: 10px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 8px; display: inline-block; }
-.status-recommended { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
-.status-suppressed { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
-.status-deferred { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-.status-specialist_handoff { background: color-mix(in srgb, var(--handoff) 18%, transparent); color: var(--handoff); }
-.status-unavailable, .status-no_recommendation { background: var(--chip); color: var(--muted); }
+.status-banner { padding: 10px 12px; border-radius: 8px; font-weight: 700; letter-spacing: 0.02em; margin-bottom: 8px; display: inline-block; border: 1px solid transparent; }
+.status-recommended { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 38%, transparent); }
+.status-suppressed { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 38%, transparent); }
+.status-deferred { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, transparent); }
+.status-specialist_handoff { background: color-mix(in srgb, var(--handoff) 16%, transparent); color: var(--handoff); border-color: color-mix(in srgb, var(--handoff) 38%, transparent); }
+.status-unavailable, .status-no_recommendation { background: var(--chip); color: var(--muted); border-color: var(--border); }
 
 .policy-list { font-size: 12px; color: var(--muted); margin: 0 0 6px; padding-left: 18px; }
 .policy-list li { margin: 1px 0; }
@@ -267,9 +295,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 .suggestion-block { margin-top: 8px; }
 .suggestion-text { line-height: 1.5; margin: 8px 0; }
 .citelist { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-.gen-badge { font-size: 11px; padding: 2px 7px; border-radius: 999px; }
-.gen-llm { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
-.gen-template { background: var(--chip); color: var(--muted); }
+.gen-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; font-weight: 600; }
+.gen-llm { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+.gen-template { background: var(--chip); color: var(--muted); border-color: var(--border); }
 .narrator-profile { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; margin-left: 8px; }
 details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .evidence-row { font-size: 11px; font-family: ui-monospace, monospace; padding: 2px 0; color: var(--muted); }
@@ -316,9 +344,9 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 .timeline-divider-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; }
 
 .trace-step { flex-shrink: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; }
-.trace-step.expanded { border-color: var(--border); background: var(--bg); }
-.trace-step.expanded.status-running { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.trace-step.expanded.status-error { border-color: var(--bad); }
+.trace-step.expanded { border-color: var(--border); background: var(--bg); box-shadow: 0 2px 14px rgba(0,0,0,0.18); }
+.trace-step.expanded.status-running { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 4px 18px color-mix(in srgb, var(--accent) 28%, transparent); }
+.trace-step.expanded.status-error { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
 
 .trace-step-header {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
@@ -356,7 +384,11 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 .trace-step-body { display: none; padding: 2px 10px 10px 44px; }
 .trace-step.expanded .trace-step-body { display: block; }
 .trace-step .now-system-label { font-size: 11px; font-weight: 600; color: var(--text); }
-.trace-step .now-business { font-size: 12.5px; color: var(--muted); margin-top: 2px; line-height: 1.4; overflow-wrap: anywhere; }
+.trace-step .now-business {
+  font-size: 12.5px; color: var(--text); margin-top: 6px; line-height: 1.5; overflow-wrap: anywhere;
+  padding: 7px 10px; border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 0 6px 6px 0;
+}
 .trace-step .now-bar-track { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; margin-top: 8px; }
 .trace-step .now-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s; }
 .trace-step.source-local .now-bar-fill { background: var(--local); }
@@ -386,7 +418,7 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
   text-align: center;
 }
 
-#log-wrap { margin: 14px 20px 0; }
+#log-wrap { flex-shrink: 0; margin: 14px 20px 0; }
 #log-wrap summary { font-size: 12px; color: var(--muted); cursor: pointer; }
 #log {
   margin-top: 8px;
