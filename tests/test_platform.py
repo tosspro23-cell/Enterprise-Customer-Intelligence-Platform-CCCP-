@@ -184,5 +184,73 @@ class TestTextMetrics(unittest.TestCase):
         self.assertIsNone(word_error_rate("", "anything"))
 
 
+class TestTriggerEngine(unittest.TestCase):
+    """Unit-level coverage of trigger.py in isolation -- TestAllScenarios
+    above already covers it end to end against all 11 scripts, but these
+    pin the specific edge/cooldown/fallback semantics directly so a future
+    change to the policy shows exactly which rule broke."""
+
+    def setUp(self):
+        from cccp_platform.trigger import TriggerEngine
+        self.engine = TriggerEngine()
+
+    def test_negative_sentiment_edge_fires_once(self):
+        self.assertEqual(self.engine.evaluate(-0.6, []), "sentiment_crossed_negative_threshold")
+        # staying negative on later turns must not re-fire the same edge
+        self.assertIsNone(self.engine.evaluate(-0.5, []))
+        self.assertIsNone(self.engine.evaluate(-0.7, []))
+
+    def test_recovery_only_fires_after_a_genuine_negative_dip(self):
+        from cccp_platform.trigger import TriggerEngine
+        # never dipped negative -> "recovered" has nothing to recover from.
+        # A high fallback isolates that from the separate periodic-check
+        # behaviour (covered in its own test below).
+        engine = TriggerEngine(fallback_every_turns=100)
+        self.assertIsNone(engine.evaluate(0.05, []))
+        self.assertIsNone(engine.evaluate(0.2, []))
+
+    def test_recovery_fires_once_after_negative(self):
+        self.engine.evaluate(-0.5, [])               # dip
+        self.assertIsNone(self.engine.evaluate(-0.1, []))   # still below recovery_threshold
+        self.assertEqual(self.engine.evaluate(0.15, []), "sentiment_recovered")
+        self.assertIsNone(self.engine.evaluate(0.3, []))    # already recovered once
+
+    def test_each_new_theme_fires_once_but_a_repeat_does_not(self):
+        self.assertEqual(self.engine.evaluate(None, ["savings"]), "new_theme:savings")
+        self.assertIsNone(self.engine.evaluate(None, ["savings"]))  # still active, not new
+        self.assertEqual(self.engine.evaluate(None, ["savings", "fees"]), "new_theme:fees")
+
+    def test_theme_bookkeeping_happens_even_when_sentiment_explains_the_turn(self):
+        # Regression: an early return from the sentiment branch used to skip
+        # updating _seen_themes, so a theme merely still active from an
+        # earlier turn (active_themes is a rolling window) would wrongly
+        # look "new" again later and fire a second time.
+        self.assertEqual(self.engine.evaluate(-0.6, ["fees"]), "sentiment_crossed_negative_threshold")
+        self.assertIsNone(self.engine.evaluate(-0.5, ["fees"]))  # "fees" must already be "seen"
+
+    def test_periodic_fallback_fires_when_nothing_else_does(self):
+        engine = type(self.engine)(fallback_every_turns=2)
+        self.assertIsNone(engine.evaluate(0.1, []))
+        self.assertEqual(engine.evaluate(0.1, []), "periodic_check")
+
+    def test_periodic_fallback_is_one_shot_not_a_recurring_timer(self):
+        # Once the call has been assessed at least once (by any condition),
+        # further periodic checks would spend a real decision call on a
+        # conversation that hasn't actually changed -- only a genuine edge
+        # should trigger again after that.
+        engine = type(self.engine)(fallback_every_turns=2)
+        engine.evaluate(0.1, [])
+        self.assertEqual(engine.evaluate(0.1, []), "periodic_check")
+        for _ in range(6):
+            self.assertIsNone(engine.evaluate(0.1, []))
+
+    def test_describe_covers_every_reason_shape(self):
+        from cccp_platform.trigger import describe
+        for reason in ("sentiment_crossed_negative_threshold", "sentiment_recovered",
+                       "periodic_check", "new_theme:savings"):
+            self.assertNotEqual(describe(reason), reason)  # every known shape gets a real gloss
+            self.assertTrue(describe(reason))
+
+
 if __name__ == "__main__":
     unittest.main()

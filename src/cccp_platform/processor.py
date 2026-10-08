@@ -3,12 +3,14 @@ state, and calls the real `CommercialDecisionAgent` on each triggered turn
 -- exactly the role module M5-M10 play in the production design, minus the
 network hops.
 
-The script decides *when* a turn is a trigger (an explicit `trigger: true`
-flag per scripted turn), standing in for the production trigger policy
-(M8: new high-priority theme, a sentiment threshold crossed, an explicit
-agent request, ...). What happens once triggered -- building a
-`LiveCallSignal`, calling the agent, handling its outcome -- is identical to
-the real-time path.
+*When* a turn triggers a decision is computed live by `trigger.py` (M8)
+from the same rolling sentiment / active-theme state this module already
+updates every turn -- not a flag authored into the call script. Only the
+conversation content is scripted (what each side says); everything
+derived from it -- themes, whether/when a decision check fires -- is
+computed the same way it would be for a live, unscripted call. What
+happens once triggered -- building a `LiveCallSignal`, calling the agent,
+handling its outcome -- is identical to the real-time path.
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ from cccp_agent.narrative import readable_policy_decisions
 from .call_state import CallState, update_sentiment, update_themes
 from .events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, EventSequencer, SENTIMENT_UPDATED,
                       SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
+from .themes import tag_themes
+from .trigger import TriggerEngine, describe as describe_trigger
 
 TURN_DELAY_S = 0.55   # paced for a human to follow in the demo UI; not a latency claim
 
@@ -101,6 +105,7 @@ def run_call(
     seq = EventSequencer(call_id, customer_id, trace_id, "stream-processor-sim", sink)
     state = CallState(call_id, customer_id, agent_id, trace_id=trace_id)
     decisions: list[DecisionResult] = []
+    trigger_engine = TriggerEngine()
 
     started_payload = {"customer_id": customer_id, "agent_id": agent_id}
     if customer_profile:
@@ -114,7 +119,13 @@ def run_call(
 
         if turn["channel"] != "customer":
             continue
-        sentiment, themes = turn.get("sentiment"), turn.get("themes", [])
+        # Themes are computed for real from the actual text -- tag_themes()
+        # is a pure keyword match, no API call, so there's no reason to
+        # prefer a script-authored label over it. Sentiment still comes
+        # from the script's label: local/offline mode makes no Azure
+        # Language call, so this one stays an explicit stand-in rather
+        # than a fabricated "real-time" number.
+        sentiment, themes = turn.get("sentiment"), tag_themes(turn["text"])
         if sentiment is not None:
             rolling = update_sentiment(state, sentiment)
             seq.emit(SENTIMENT_UPDATED, {"utterance_sentiment": sentiment, "rolling_sentiment": round(rolling, 3)})
@@ -122,14 +133,20 @@ def run_call(
             active = update_themes(state, themes)
             seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active})
 
-        if not turn.get("trigger"):
+        # Whether to consult the decision engine on THIS turn is no longer a
+        # script-authored flag -- it's computed live from the same rolling
+        # sentiment / active-theme state just updated above (trigger.py),
+        # the same signals a real stream processor would have.
+        reason = trigger_engine.evaluate(state.current_sentiment, state.active_themes)
+        if not reason:
             continue
 
         live = LiveCallSignal(call_id, state.current_sentiment or 0.0, tuple(state.active_themes))
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
         decisions.append(result)
         state.commercial_state = result.outcome.value
-        seq.emit("pipeline.group", {"kind": "decision", "label": "Commercial decision triggered"})
+        seq.emit("pipeline.group", {"kind": "decision",
+                                     "label": f"Commercial decision triggered -- {describe_trigger(reason)}"})
         _emit_decision_stages(seq, result)
         seq.emit(DECISION_MADE, {
             "outcome": result.outcome.value,

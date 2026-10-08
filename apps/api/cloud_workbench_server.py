@@ -62,6 +62,8 @@ from cccp_platform.azure_backends.search_guidance import AzureSearchGuidanceInde
 from cccp_platform.azure_backends.sentiment_language import analyse_sentiment, tag_themes  # noqa: E402
 from cccp_platform.azure_backends.speech import synthesize as speech_synthesize  # noqa: E402
 from cccp_platform.azure_backends.speech import transcribe as speech_transcribe  # noqa: E402
+from cccp_platform.trigger import TriggerEngine  # noqa: E402
+from cccp_platform.trigger import describe as describe_trigger  # noqa: E402
 from cccp_platform.events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, EventSequencer, SENTIMENT_UPDATED,
                                    SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
 from cccp_platform.postcall import build_enrichment
@@ -185,6 +187,7 @@ def start_call(script_id: str) -> str:
                                              narrator_timeout_s=NARRATOR_DEADLINE_S)
             decisions = []
             wers: list[float] = []
+            trigger_engine = TriggerEngine()
 
             customer_record = estate.customer_port().get_customer(script["customer_id"])
             seq.emit(CALL_STARTED, {
@@ -276,12 +279,20 @@ def start_call(script_id: str) -> str:
                     stage_done("redis", iid, state.round_trip_latencies_s[-1] * 1000, {"active_themes": active})
                     seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active})
 
-                if not turn.get("trigger"):
+                # Whether to consult the decision engine on THIS turn is no
+                # longer a script-authored flag -- it's computed live from
+                # the same rolling sentiment / active-theme state Redis
+                # already holds (trigger.py), the same signals a real stream
+                # processor would have. This one read serves both the
+                # trigger check and (if it fires) the LiveCallSignal below.
+                sentiment_now, themes_now = state.read_live_signal()
+                reason = trigger_engine.evaluate(sentiment_now, themes_now)
+                if not reason:
                     continue
 
                 # --- the real decision: policy gate -> ML score -> guidance -> narrator ---
-                browser_put("pipeline.group", {"kind": "decision", "label": "Commercial decision triggered"})
-                sentiment_now, themes_now = state.read_live_signal()
+                browser_put("pipeline.group", {"kind": "decision",
+                                                "label": f"Commercial decision triggered -- {describe_trigger(reason)}"})
                 live = LiveCallSignal(run_id, sentiment_now or 0.0, tuple(themes_now))
                 result = agent.run(DecisionRequest(script["customer_id"], AS_OF, call_id=run_id, live_signal=live))
                 decisions.append(result)

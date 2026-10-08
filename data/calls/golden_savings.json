@@ -6,13 +6,13 @@
   "utterances": [
     {"channel": "agent", "text": "Thanks for calling, this is Alex -- how can I help today?"},
     {"channel": "customer", "text": "I'm still annoyed about these monthly fees, this is the third time I've called.",
-     "sentiment": -0.6, "themes": ["fees"], "trigger": true},
+     "sentiment": -0.6},
     {"channel": "agent", "text": "I completely understand the frustration -- let me look at your account."},
     {"channel": "customer", "text": "Thank you. The refund from last month did help, I'll admit.",
-     "sentiment": 0.2, "themes": ["fees"]},
+     "sentiment": 0.2},
     {"channel": "agent", "text": "I'm glad to hear that. Anything else I can help with today?"},
     {"channel": "customer", "text": "Actually yes -- I've been thinking about putting some money aside. Do you have a decent savings option?",
-     "sentiment": 0.4, "themes": ["savings"], "trigger": true},
+     "sentiment": 0.4},
     {"channel": "agent", "text": "Let me check what's available for you based on your account."},
     {"channel": "customer", "text": "That sounds good, thank you."},
     {"channel": "agent", "text": "Thanks for calling, have a great day!"}

@@ -23,6 +23,7 @@ from .sentiment_language import analyse_sentiment, tag_themes
 from .speech import roundtrip as speech_roundtrip
 from ..events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, EventSequencer, SENTIMENT_UPDATED,
                        SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
+from ..trigger import TriggerEngine
 
 
 def run_call_cloud(
@@ -36,6 +37,7 @@ def run_call_cloud(
     seq = EventSequencer(call_id, customer_id, trace_id, "cloud-processor", event_sink)
     state = RedisCallState(call_id, customer_id, agent_id)
     decisions: list[DecisionResult] = []
+    trigger_engine = TriggerEngine()
 
     seq.emit(CALL_STARTED, {"customer_id": customer_id, "agent_id": agent_id})
 
@@ -43,17 +45,17 @@ def run_call_cloud(
         seq.emit(UTTERANCE_FINAL, {"channel": turn["channel"], "text": turn["text"]})
         if turn["channel"] != "customer":
             continue
-        sentiment, themes = turn.get("sentiment"), turn.get("themes", [])
+        sentiment, themes = turn.get("sentiment"), tag_themes(turn["text"])
         if sentiment is not None:
             rolling = state.update_sentiment(sentiment)
             seq.emit(SENTIMENT_UPDATED, {"utterance_sentiment": sentiment, "rolling_sentiment": round(rolling, 3)})
         if themes:
             active = state.update_themes(themes)
             seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active})
-        if not turn.get("trigger"):
-            continue
 
         sentiment_now, themes_now = state.read_live_signal()
+        if not trigger_engine.evaluate(sentiment_now, themes_now):
+            continue
         live = LiveCallSignal(call_id, sentiment_now or 0.0, tuple(themes_now))
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
         decisions.append(result)
@@ -104,6 +106,7 @@ def run_call_cloud_voice(
     state = RedisCallState(call_id, customer_id, agent_id)
     decisions: list[DecisionResult] = []
     voice_log: list[dict] = []
+    trigger_engine = TriggerEngine()
 
     seq.emit(CALL_STARTED, {"customer_id": customer_id, "agent_id": agent_id})
 
@@ -127,9 +130,9 @@ def run_call_cloud_voice(
             active = state.update_themes(themes)
             seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active})
 
-        if not turn.get("trigger"):
-            continue
         sentiment_now, themes_now = state.read_live_signal()
+        if not trigger_engine.evaluate(sentiment_now, themes_now):
+            continue
         live = LiveCallSignal(call_id, sentiment_now or 0.0, tuple(themes_now))
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
         decisions.append(result)

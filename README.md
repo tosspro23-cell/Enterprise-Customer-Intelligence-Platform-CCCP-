@@ -312,14 +312,27 @@ laptop (`evals/report/loadtest_report.json`), once from inside Azure
 (`evals/report/loadtest_report_containerapps.json`), 36/36 calls
 succeeded combined, 0 errors; the real-time audio/sentiment path with
 real services (Azure TTS -> Azure STT -> Azure AI Language sentiment)
-producing the same decision outcomes as the hand-labelled script did --
-which validates the sentiment path, **not** theme tagging: live themes feed
-no policy gate, and replaying the keyword tagger over the 49 scripted
-customer turns still disagrees with the hand labels on 15 (19 before it
-was switched to whole-word matching); those runs also used
-`recognize_once()`, since replaced by continuous recognition (multi-
-sentence turns could be truncated) and not yet re-run; a container image
-built by CI and deployed to Azure Container Apps.
+producing correct decision outcomes end to end; the M8 trigger policy
+(`trigger.py`) -- whether/when a turn consults the decision engine is now
+computed live from rolling sentiment and active themes, not a per-turn
+`trigger: true` flag authored into the call script (that field has been
+removed from `data/calls/`) -- against all 11 scenarios (`TestAllScenarios`)
+and live against real Azure STT/sentiment, where it fires on genuinely
+different turns/reasons than the old scripted flag did depending on what
+Azure actually recognised and scored for that run; a container image built
+by CI and deployed to Azure Container Apps.
+
+Live themes now do drive *when* a decision gets checked (via the trigger),
+but still feed no policy *gate outcome* directly -- R0-R3 read sentiment,
+customer flags and case history, never themes. Theme tagging itself is
+still a keyword match, not a trained classifier (see `themes.py`); its
+patterns were broadened to catch more natural phrasings for the trigger's
+sake but still are not semantic understanding, and a prior run replaying
+the keyword tagger over 49 scripted customer turns disagreed with
+hand-authored labels on 15 of them with the original narrower patterns
+(not yet re-measured with the broadened set). STT also moved from
+`recognize_once()` to continuous recognition since that comparison was
+last run (multi-sentence turns could be truncated before).
 
 Azure AI Search, specifically, is validated as a managed dependency on the
 hot path (connectivity, latency, filtering) -- it is used as a filtered
