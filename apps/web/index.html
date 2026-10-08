@@ -54,15 +54,12 @@
   <div class="profile-chips" id="profile-chips"></div>
 </div>
 
-<!-- Business-facing summary: what happened and why, in plain language -->
-<section class="panel decision-summary" id="decision-summary">
-  <h2>Outcome</h2>
-  <div id="status-area"><span class="empty">Run a call to see the commercial decision here.</span></div>
-</section>
-
-<div class="split">
-  <!-- Call transcript -->
-  <section class="panel">
+<!-- Left: the conversation, top to bottom. Right: Outcome (fixed, the
+     headline) stacked above the pipeline trace (the reasoning that got
+     there), mirroring how Outcome is the conclusion and trace is the work
+     that produced it. -->
+<div class="call-layout">
+  <section class="panel transcript-panel">
     <h2>Call transcript</h2>
     <div id="transcript"><span class="empty">Run a call to see it here.</span></div>
     <div class="sub-panel">
@@ -73,15 +70,23 @@
     </div>
   </section>
 
-  <!-- Engineering-facing pipeline trace: what's happening right now, in full,
-       plus a compact scrolling strip of every node that's run so far. -->
-  <section class="panel">
-    <h2>Pipeline trace <span class="hint">what's happening right now, and where it sits in the chain</span></h2>
-    <div id="trace-now" class="trace-now idle">
-      <div class="trace-now-empty">Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows.</div>
-    </div>
-    <div id="trace-timeline" class="trace-timeline"><span class="empty">No steps yet.</span></div>
-  </section>
+  <div class="call-right-col">
+    <!-- Business-facing summary: what happened and why, in plain language -->
+    <section class="panel decision-summary" id="decision-summary">
+      <h2>Outcome</h2>
+      <div id="status-area"><span class="empty">Run a call to see the commercial decision here.</span></div>
+    </section>
+
+    <!-- Engineering-facing pipeline trace: a running step is expanded in
+         full (what it's doing, why, the real data it touched); once the
+         call moves on, that step collapses to a one-line summary and the
+         next one expands -- like watching an agent reason through a task
+         step by step, not a flat log. -->
+    <section class="panel trace-panel">
+      <h2>Pipeline trace <span class="hint">the current step in full; past steps collapse to a summary</span></h2>
+      <div id="trace-timeline" class="trace-timeline"><span class="empty">Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows.</span></div>
+    </section>
+  </div>
 </div>
 
 <div id="log-wrap">

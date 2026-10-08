@@ -91,12 +91,22 @@ header h1 { font-size: 16px; margin: 0; }
   .agent-sidebar { width: auto; max-height: 260px; position: static; border-right: none; border-bottom: 1px solid var(--border); }
 }
 
-.scenario-list { display: flex; flex-direction: column; gap: 4px; }
+.scenario-list { display: flex; flex-direction: column; gap: 1px; }
+/* Grouped by category (like a sidebar of chats grouped by project) instead
+   of a colored tag badge on every row -- the badge ate space the title
+   needed and, repeated down a tall list, read as visual noise rather than
+   structure. The group header carries the category now. */
+.scenario-group-header {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); margin: 14px 2px 4px; padding: 0 6px;
+}
+.scenario-group-header:first-child { margin-top: 2px; }
+.scenario-group-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .scenario-row {
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 7px;
   padding: 7px 8px;
   border-radius: 7px;
   border: 1px solid transparent;
@@ -109,7 +119,6 @@ header h1 { font-size: 16px; margin: 0; }
 .scenario-row:hover { background: var(--chip); }
 .scenario-row:disabled { opacity: 0.45; cursor: default; }
 .scenario-row.running { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.scenario-tag { font-size: 9px; font-weight: 700; letter-spacing: 0.02em; padding: 2px 5px; border-radius: 4px; color: #fff; flex-shrink: 0; }
 .scenario-row-text { min-width: 0; }
 .scenario-customer { font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace; display: block; }
 .scenario-title { font-size: 11.5px; line-height: 1.3; white-space: normal; }
@@ -135,7 +144,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .panel h2 .hint { text-transform: none; letter-spacing: normal; font-size: 11px; font-weight: 400; color: var(--muted); opacity: 0.8; }
 
-.decision-summary { margin: 16px 20px 0; }
+.decision-summary { margin: 0; }
 
 /* Lives inline in the header now (next to the logo/badges) instead of its
    own full-width row, so the Outcome/transcript/trace panels below get that
@@ -199,6 +208,24 @@ button:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
 .split .panel { display: flex; flex-direction: column; height: 610px; min-width: 0; }
 
+/* Agent view: transcript full-height on the left; Outcome (fixed) stacked
+   above the pipeline trace (flexes to fill the rest) on the right -- the
+   conclusion sits above the reasoning that produced it. Grid stretch makes
+   the transcript match the right column's height without hard-coding it
+   twice. */
+.call-layout {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 14px;
+  padding: 14px 20px 0;
+  align-items: stretch;
+}
+@media (max-width: 900px) { .call-layout { grid-template-columns: 1fr; } }
+.call-layout .transcript-panel { display: flex; flex-direction: column; min-width: 0; }
+.call-right-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.call-right-col .decision-summary { flex-shrink: 0; }
+.call-right-col .trace-panel { flex: 1; min-height: 610px; display: flex; flex-direction: column; min-width: 0; }
+
 .sub-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
 
 /* Fixed heights everywhere in the live view, not max-height-that-grows: the
@@ -248,61 +275,94 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
 .evidence-row { font-size: 11px; font-family: ui-monospace, monospace; padding: 2px 0; color: var(--muted); }
 
 /* ---------------------------------------------------------- pipeline trace
-   Two parts: a big "now" card showing the current (or most recently clicked)
-   stage in full -- code, label, business/technical explanation, rendered
-   detail -- and below it a compact horizontally-scrolling strip of every
-   node run so far, grouped by turn, so pausing mid-call still shows exactly
-   where you are in the chain without scrolling through a long flat list. */
+   A vertical, bottom-anchored feed of steps (like the transcript): new
+   steps append at the bottom and the view auto-scrolls to them, fixed
+   width, no horizontal scroll ever. The step the call is currently on (or
+   whichever one was last clicked) is expanded in place -- full business/
+   technical explanation, the real data it touched; every other step
+   collapses to a one-line summary. The effect is closer to watching an
+   agent reason through a task one step at a time than reading a flat log. */
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes thinking-ring {
+  0% { transform: scale(0.5); opacity: 0.7; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
 
-.trace-now {
-  flex-shrink: 0;
+.trace-timeline {
+  flex: 1;
   min-width: 0;
-  min-height: 160px;
-  max-height: 60%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   overflow-y: auto;
   overflow-x: hidden;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 10px;
-  background: var(--bg);
+  padding: 2px;
 }
-.trace-now.status-running { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.trace-now.status-error { border-color: var(--bad); }
-.trace-now.idle { display: flex; align-items: center; }
-.trace-now-empty { color: var(--muted); font-size: 12.5px; font-style: italic; }
-.now-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
-.now-code {
-  font-family: ui-monospace, monospace;
-  font-size: 12.5px;
-  font-weight: 700;
-  padding: 6px 9px;
-  border-radius: 7px;
-  color: #fff;
-  background: var(--local);
-  flex-shrink: 0;
-  min-width: 54px;
-  text-align: center;
+
+.timeline-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 2px;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-weight: 600;
 }
-.trace-now.source-cloud .now-code { background: var(--cloud); }
-.trace-now.source-local .now-code { background: var(--local); }
-.now-text { flex: 1 1 160px; min-width: 0; }
-.now-label { font-weight: 700; font-size: 14.5px; }
-.now-label .now-system { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
-.now-business { font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; overflow-wrap: anywhere; }
-.now-status { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 999px; flex-shrink: 0; }
-.now-status.replayed { border: 1px dashed currentColor; }
-.now-status.status-running { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
-.now-status.status-done { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
-.now-status.status-error { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); }
-.now-ms { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--muted); white-space: nowrap; flex-shrink: 0; }
-.now-bar-track { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; margin-top: 8px; }
-.now-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s; }
-.trace-now.source-local .now-bar-fill { background: var(--local); }
-.now-detail { margin-top: 8px; }
-.now-technical { font-size: 11.5px; color: var(--muted); margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); line-height: 1.5; overflow-wrap: anywhere; }
-.now-eh-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+.timeline-divider:first-child { margin-top: 2px; }
+.timeline-divider::before, .timeline-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); min-width: 8px; }
+.timeline-divider.kind-decision { color: var(--accent); }
+.timeline-divider.kind-decision::before, .timeline-divider.kind-decision::after { background: var(--accent); opacity: 0.4; }
+.timeline-divider-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; }
+
+.trace-step { flex-shrink: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; }
+.trace-step.expanded { border-color: var(--border); background: var(--bg); }
+.trace-step.expanded.status-running { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.trace-step.expanded.status-error { border-color: var(--bad); }
+
+.trace-step-header {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
+  border: none; border-radius: 8px; background: transparent; color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.trace-step:not(.expanded) .trace-step-header:hover { background: var(--chip); }
+
+/* The "thinking" icon: the core dot pulses and a ring expands outward from
+   it, radar-ping style, while the step is actually running -- a clearer
+   "the agent is working on this right now" cue than a static status dot. */
+.step-icon { position: relative; width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.step-icon-core { width: 8px; height: 8px; border-radius: 50%; background: var(--local); position: relative; z-index: 1; }
+.trace-step.source-cloud .step-icon-core { background: var(--cloud); }
+.trace-step.status-error .step-icon-core { background: var(--bad); }
+.trace-step.status-running .step-icon-core { animation: pulse 1.2s ease-in-out infinite; }
+.trace-step.status-running .step-icon::before, .trace-step.status-running .step-icon::after {
+  content: ""; position: absolute; width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid var(--accent); opacity: 0; animation: thinking-ring 1.6s ease-out infinite;
+}
+.trace-step.status-running .step-icon::after { animation-delay: 0.6s; }
+
+.trace-step-code {
+  font-family: ui-monospace, monospace; font-size: 10px; font-weight: 700; padding: 3px 6px;
+  border-radius: 5px; color: #fff; background: var(--local); flex-shrink: 0;
+}
+.trace-step.source-cloud .trace-step-code { background: var(--cloud); }
+.trace-step-name { flex: 1; min-width: 0; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trace-step.expanded .trace-step-name { font-weight: 600; font-size: 13px; white-space: normal; }
+.trace-step-status { flex-shrink: 0; font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.02em; }
+.trace-step-status.replayed { border: 1px dashed var(--muted); border-radius: 999px; padding: 1px 6px; }
+.trace-step.status-error .trace-step-status { color: var(--bad); }
+.trace-step-ms { flex-shrink: 0; font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+
+.trace-step-body { display: none; padding: 2px 10px 10px 44px; }
+.trace-step.expanded .trace-step-body { display: block; }
+.trace-step .now-system-label { font-size: 11px; font-weight: 600; color: var(--text); }
+.trace-step .now-business { font-size: 12.5px; color: var(--muted); margin-top: 2px; line-height: 1.4; overflow-wrap: anywhere; }
+.trace-step .now-bar-track { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; margin-top: 8px; }
+.trace-step .now-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s; }
+.trace-step.source-local .now-bar-fill { background: var(--local); }
+.trace-step .now-detail { margin-top: 8px; }
+.trace-step .now-technical { font-size: 11.5px; color: var(--muted); margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); line-height: 1.5; overflow-wrap: anywhere; }
+.trace-step .now-eh-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
 
 .trace-detail-list { font-size: 11.5px; color: var(--muted); margin: 4px 0 0; padding-left: 16px; overflow-wrap: anywhere; }
 .trace-detail-list li { margin: 1px 0; }
@@ -311,8 +371,8 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
   margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-width: 100%;
 }
 
-/* Used standalone (not a button) by the Supervisor replay view's inline stage
-   chips -- kept separate from the live timeline rows below. */
+/* Used standalone (not this feed's markup) by the Supervisor replay view's
+   inline stage chips. */
 .trace-code {
   font-family: ui-monospace, monospace;
   font-size: 10px;
@@ -325,66 +385,6 @@ details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-
   border: none;
   text-align: center;
 }
-
-/* A vertical, bottom-anchored feed (like the transcript): new nodes append at
-   the bottom and the view auto-scrolls down to them, older ones scroll up
-   and out of view. Fixed width, no horizontal scroll ever -- this is what
-   replaced a horizontally-scrolling chip strip, which could force the whole
-   panel wider than its grid column and squeeze the transcript next to it. */
-.trace-timeline {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 2px;
-}
-.timeline-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0 2px;
-  font-size: 10.5px;
-  color: var(--muted);
-  font-weight: 600;
-}
-.timeline-divider:first-child { margin-top: 2px; }
-.timeline-divider::before, .timeline-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); min-width: 8px; }
-.timeline-divider.kind-decision { color: var(--accent); }
-.timeline-divider.kind-decision::before, .timeline-divider.kind-decision::after { background: var(--accent); opacity: 0.4; }
-.timeline-divider-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; }
-
-.timeline-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  padding: 5px 8px;
-  border-radius: 7px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.timeline-row:hover { background: var(--chip); }
-.timeline-row.is-selected { border-color: var(--border); background: var(--chip); }
-.timeline-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--local); }
-.timeline-row.source-cloud .timeline-dot { background: var(--cloud); }
-.timeline-row.source-local .timeline-dot { background: var(--local); }
-.timeline-row.status-running { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.timeline-row.status-running .timeline-dot { animation: pulse 1.2s ease-in-out infinite; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
-.timeline-row.status-error .timeline-dot { background: var(--bad); }
-.timeline-row.status-error .timeline-row-meta { color: var(--bad); }
-.timeline-row-label { flex: 1; min-width: 0; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.timeline-row-label .timeline-row-name { color: var(--muted); font-weight: 400; margin-left: 5px; }
-.timeline-row-meta { flex-shrink: 0; font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 
 #log-wrap { margin: 14px 20px 0; }
 #log-wrap summary { font-size: 12px; color: var(--muted); cursor: pointer; }

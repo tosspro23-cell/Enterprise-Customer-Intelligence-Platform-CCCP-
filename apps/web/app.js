@@ -4,7 +4,6 @@ const sentimentValueEl = document.getElementById("sentiment-value");
 const sentimentFillEl = document.getElementById("sentiment-fill");
 const themesEl = document.getElementById("themes");
 const statusAreaEl = document.getElementById("status-area");
-const traceNowEl = document.getElementById("trace-now");
 const traceTimelineEl = document.getElementById("trace-timeline");
 const logEl = document.getElementById("log");
 const answerEl = document.getElementById("answer");
@@ -77,11 +76,11 @@ function logLine(evt) {
 }
 
 // Pipeline-trace state: one record per stage instance (business/technical/
-// detail/status/audio), a timeline chip per instance for the compact strip,
-// and which instance the big "now" card is currently showing.
+// detail/status/audio), a step element per instance in the trace feed, and
+// which instance is currently expanded (showing its full detail).
 let stageRecords = {};
 let timelineRowsById = {};
-let currentNowInstanceId = null;
+let expandedInstanceId = null;
 
 function resetPanels() {
   resetPlayback();
@@ -98,11 +97,9 @@ function resetPanels() {
   logEl.innerHTML = "";
   stageRecords = {};
   timelineRowsById = {};
-  currentNowInstanceId = null;
-  traceNowEl.className = "trace-now idle";
-  traceNowEl.innerHTML = '<div class="trace-now-empty">Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows.</div>';
+  expandedInstanceId = null;
   clearChildren(traceTimelineEl);
-  traceTimelineEl.appendChild(emptySpan("No steps yet."));
+  traceTimelineEl.appendChild(emptySpan("Run a call to see every stage here -- this fills in automatically, nothing to switch on. In local mode the decision stages show; in LIVE AZURE mode every stage shows."));
   resetProfile();
 }
 
@@ -339,37 +336,19 @@ function handleGroup(p) {
   traceTimelineEl.scrollTop = traceTimelineEl.scrollHeight;
 }
 
-// The big "now" card always shows whichever stage instance was most recently
-// started/finished -- that's "what's happening right now" while a call is
-// live, and "what just happened" once it's paused. Clicking an older node in
-// the timeline strip below re-points it at that node's detail instead, for a
-// quick look back; the next stage event pulls it back to live.
-function renderNowCard(instanceId) {
-  const rec = stageRecords[instanceId];
-  if (!rec) return;
-  const prevRow = timelineRowsById[currentNowInstanceId];
-  if (prevRow) prevRow.classList.remove("is-selected");
-  currentNowInstanceId = instanceId;
-  const row = timelineRowsById[instanceId];
-  if (row) row.classList.add("is-selected");
-  const meta = effectiveMeta(rec.stage, rec.local);
-  traceNowEl.className = `trace-now source-${meta.source} status-${rec.status}`;
+// Fills one step's expandable body: business/technical explanation,
+// rendered detail, latency bar, audio replay if any -- the content that used
+// to live in a separate fixed "now" card, now inline inside the step.
+function fillStepBody(bodyEl, rec, meta) {
   const ms = typeof rec.ms === "number" ? rec.ms : null;
-  traceNowEl.innerHTML = `
-    <div class="now-head">
-      <span class="now-code">${meta.code}</span>
-      <div class="now-text">
-        <div class="now-label">${meta.label}<span class="now-system">${meta.system}</span></div>
-        <div class="now-business">${meta.business}</div>
-      </div>
-      <span class="now-status status-${rec.status}${rec.replayed ? " replayed" : ""}" title="${rec.replayed ? "Replayed from the agent trace after the decision completed; durations are real" : ""}">${rec.status}</span>
-      <span class="now-ms">${ms !== null ? ms.toFixed(0) + " ms" : ""}</span>
-    </div>
+  bodyEl.innerHTML = `
+    <div class="now-system-label">${meta.system}</div>
+    <div class="now-business">${meta.business}</div>
     <div class="now-bar-track"><div class="now-bar-fill" style="width:${ms !== null ? Math.min(100, Math.round((ms / TRACE_SCALE_MS) * 100)) : 0}%"></div></div>
     <div class="now-detail"></div>
     <div class="now-technical">${meta.technical}</div>
     <div class="now-eh-note">${typeof rec.ehMs === "number" ? `+ published to Event Hubs in ${rec.ehMs.toFixed(0)} ms` : ""}</div>`;
-  const detailEl = traceNowEl.querySelector(".now-detail");
+  const detailEl = bodyEl.querySelector(".now-detail");
   if (rec.status === "error" && rec.detail && rec.detail.error) {
     const raw = document.createElement("pre");
     raw.className = "trace-raw";
@@ -390,49 +369,70 @@ function renderNowCard(instanceId) {
     audio.controls = true;
     audio.style.cssText = "width:100%;height:28px;margin-top:8px;";
     audio.src = `data:audio/wav;base64,${rec.audioB64}`;
-    traceNowEl.appendChild(audio);
+    bodyEl.appendChild(audio);
   }
 }
 
-function addTimelineNode(instanceId, stage, isLocal) {
+// Only one step is ever expanded -- the one currently running (or just
+// finished), or whichever one got clicked to look back at. The next live
+// stage event always expands itself and collapses whatever was open: a
+// click is a momentary look back, not a pin. This is what makes the feed
+// read like watching an agent reason through a task one step at a time
+// instead of a flat, equally-sized log.
+function setExpanded(instanceId) {
+  if (expandedInstanceId && expandedInstanceId !== instanceId) {
+    timelineRowsById[expandedInstanceId]?.classList.remove("expanded");
+  }
+  expandedInstanceId = instanceId;
+  timelineRowsById[instanceId]?.classList.add("expanded");
+}
+
+// Rebuilds one step's header + body from its current record. Re-attaches
+// the header's click handler each time since innerHTML wipes it.
+function renderStep(instanceId) {
+  const rec = stageRecords[instanceId];
+  const step = timelineRowsById[instanceId];
+  if (!rec || !step) return;
+  const meta = effectiveMeta(rec.stage, rec.local);
+  const ms = typeof rec.ms === "number" ? rec.ms : null;
+  step.className = `trace-step source-${meta.source} status-${rec.status}`;
+  if (expandedInstanceId === instanceId) step.classList.add("expanded");
+  step.innerHTML = `
+    <button type="button" class="trace-step-header">
+      <span class="step-icon"><span class="step-icon-core"></span></span>
+      <span class="trace-step-code">${meta.code}</span>
+      <span class="trace-step-name">${esc(meta.label || rec.stage)}</span>
+      <span class="trace-step-status${rec.replayed ? " replayed" : ""}" title="${rec.replayed ? "Replayed from the agent trace after the decision completed; durations are real" : ""}">${rec.status === "running" ? "thinking…" : rec.status}</span>
+      <span class="trace-step-ms">${ms !== null ? ms.toFixed(0) + " ms" : ""}</span>
+    </button>
+    <div class="trace-step-body"></div>`;
+  fillStepBody(step.querySelector(".trace-step-body"), rec, meta);
+  step.querySelector(".trace-step-header").addEventListener("click", () => setExpanded(instanceId));
+}
+
+function addTraceStep(instanceId) {
   if (traceTimelineEl.querySelector(".empty")) clearChildren(traceTimelineEl);
-  const meta = effectiveMeta(stage, isLocal);
-  const row = document.createElement("button");
-  row.type = "button";
-  row.className = `timeline-row source-${meta.source} status-running`;
-  row.title = meta.label || stage;
-  row.innerHTML = `
-    <span class="timeline-dot"></span>
-    <span class="timeline-row-label">${meta.code}<span class="timeline-row-name">${esc(meta.label || stage)}</span></span>
-    <span class="timeline-row-meta">running&hellip;</span>`;
-  row.addEventListener("click", () => renderNowCard(instanceId));
-  traceTimelineEl.appendChild(row);
-  timelineRowsById[instanceId] = row;
-  traceTimelineEl.scrollTop = traceTimelineEl.scrollHeight;
-  return row;
+  const step = document.createElement("div");
+  step.className = "trace-step";
+  traceTimelineEl.appendChild(step);
+  timelineRowsById[instanceId] = step;
+  return step;
 }
 
 function handleStage(p) {
-  let row = timelineRowsById[p.instance_id];
-  if (!row) row = addTimelineNode(p.instance_id, p.stage, p.local);
-  const metaEl = row.querySelector(".timeline-row-meta");
+  if (!timelineRowsById[p.instance_id]) addTraceStep(p.instance_id);
 
   if (p.status === "running") {
     stageRecords[p.instance_id] = { stage: p.stage, status: "running", local: !!p.local };
-    row.className = row.className.replace(/status-\S+/, "status-running");
-    metaEl.textContent = "running…";
   } else if (p.status === "done") {
     stageRecords[p.instance_id] = { stage: p.stage, status: "done", ms: p.ms, detail: p.detail,
                                      ehMs: p._eh_publish_ms, audioB64: stageRecords[p.instance_id]?.audioB64,
                                      replayed: !!p.replayed, local: !!p.local };
-    row.className = row.className.replace(/status-\S+/, "status-done");
-    metaEl.textContent = typeof p.ms === "number" ? `${p.ms.toFixed(0)} ms` : "done";
   } else if (p.status === "error") {
     stageRecords[p.instance_id] = { stage: p.stage, status: "error", detail: p.detail, local: !!p.local };
-    row.className = row.className.replace(/status-\S+/, "status-error");
-    metaEl.textContent = "failed";
   }
-  renderNowCard(p.instance_id);
+  setExpanded(p.instance_id);
+  renderStep(p.instance_id);
   traceTimelineEl.scrollTop = traceTimelineEl.scrollHeight;
 }
 
@@ -670,7 +670,7 @@ function dispatch(evt) {
     pendingAudioB64 = p.audio_base64 || null;
     const rec = stageRecords[p.instance_id];
     if (rec) rec.audioB64 = p.audio_base64;
-    if (p.instance_id === currentNowInstanceId) renderNowCard(p.instance_id);
+    if (p.instance_id === expandedInstanceId) renderStep(p.instance_id);
     return;
   }
   if (evt.event_type === "pipeline.error") {
@@ -734,30 +734,58 @@ const SCENARIO_CATEGORY = {
 // Everything else keeps the order the API returns it in.
 const PINNED_SCENARIOS = ["golden_savings", "suppressed_complaint"];
 
-async function loadScripts() {
-  const resp = await fetch("/api/scripts");
-  const scripts = await resp.json();
-  scripts.sort((a, b) => {
-    const ai = PINNED_SCENARIOS.indexOf(a.id), bi = PINNED_SCENARIOS.indexOf(b.id);
+function pinnedFirst(list, idOf) {
+  return [...list].sort((a, b) => {
+    const ai = PINNED_SCENARIOS.indexOf(idOf(a)), bi = PINNED_SCENARIOS.indexOf(idOf(b));
     if (ai === -1 && bi === -1) return 0;
     return (ai === -1 ? PINNED_SCENARIOS.length : ai) - (bi === -1 ? PINNED_SCENARIOS.length : bi);
   });
+}
+
+async function loadScripts() {
+  const resp = await fetch("/api/scripts");
+  const scripts = await resp.json();
   clearChildren(controls);
-  const rows = [];
+
+  // Grouped by category -- like a sidebar of conversations grouped by
+  // project -- instead of a colored tag badge repeated on every row, which
+  // ate the width the (often long) scenario title needed.
+  const groups = new Map();  // tag -> { color, items: [] }
   for (const s of scripts) {
     const cat = SCENARIO_CATEGORY[s.id] || { tag: "SCENARIO", color: "var(--muted)" };
-    const row = document.createElement("button");
-    row.className = "scenario-row";
-    row.title = s.title;  // full text on hover via native tooltip too, for a long sidebar list
-    row.innerHTML = `
-      <span class="scenario-tag" style="background:${cat.color}">${cat.tag}</span>
-      <div class="scenario-row-text">
-        <span class="scenario-customer">${esc(s.customer_id)}</span>
-        <div class="scenario-title">${esc(s.title)}</div>
-      </div>`;
-    rows.push(row);
-    row.addEventListener("click", () => runScript(s.id, rows, row));
-    controls.appendChild(row);
+    if (!groups.has(cat.tag)) groups.set(cat.tag, { color: cat.color, items: [] });
+    groups.get(cat.tag).items.push(s);
+  }
+  // Groups holding a pinned scenario surface first (slide 9's demo flow);
+  // within a group, that scenario floats to the top too (below).
+  const pinnedTags = PINNED_SCENARIOS.map((id) => (SCENARIO_CATEGORY[id] || {}).tag).filter(Boolean);
+  const orderedTags = [...groups.keys()].sort((a, b) => {
+    const ai = pinnedTags.indexOf(a), bi = pinnedTags.indexOf(b);
+    if (ai === -1 && bi === -1) return 0;
+    return (ai === -1 ? pinnedTags.length : ai) - (bi === -1 ? pinnedTags.length : bi);
+  });
+
+  const rows = [];
+  for (const tag of orderedTags) {
+    const group = groups.get(tag);
+    const header = document.createElement("div");
+    header.className = "scenario-group-header";
+    header.innerHTML = `<span class="scenario-group-dot" style="background:${group.color}"></span>${esc(tag)}`;
+    controls.appendChild(header);
+
+    for (const s of pinnedFirst(group.items, (x) => x.id)) {
+      const row = document.createElement("button");
+      row.className = "scenario-row";
+      row.title = s.title;  // full text on hover via native tooltip too, for a long sidebar list
+      row.innerHTML = `
+        <div class="scenario-row-text">
+          <span class="scenario-customer">${esc(s.customer_id)}</span>
+          <div class="scenario-title">${esc(s.title)}</div>
+        </div>`;
+      rows.push(row);
+      row.addEventListener("click", () => runScript(s.id, rows, row));
+      controls.appendChild(row);
+    }
   }
 }
 
