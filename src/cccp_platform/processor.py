@@ -153,16 +153,22 @@ def run_call(
             "policy_decisions": readable_policy_decisions(result.policy_decisions, agent.catalog),
             "degraded": list(result.degraded),
             "trace_id": result.trace_id,
+            "trigger_reason": describe_trigger(reason),
         })
-        if result.outcome.value == "recommended":
-            seq.emit(SUGGESTION_GENERATED, {
-                "product_id": result.recommendation.product_id,
-                "propensity": result.recommendation.propensity,
-                "explanation": result.explanation.text,
-                "cited_document_ids": list(result.explanation.cited_document_ids),
-                "generated_by": result.explanation.generated_by,
-                "evidence": [e.__dict__ for e in result.evidence],
-            })
+        # Always surfaced, not just for "recommended": a deferred/suppressed/
+        # handoff outcome still carries agent guidance (non_offer_explanation)
+        # telling the agent what to focus on instead -- that's at least as
+        # important to show as the product pitch, if not more so. No product
+        # is ever named outside the "recommended" path (product_id/propensity
+        # stay None), so this adds guidance text, never a commercial claim.
+        seq.emit(SUGGESTION_GENERATED, {
+            "product_id": result.explanation.product_id,
+            "propensity": result.recommendation.propensity if result.recommendation else None,
+            "explanation": result.explanation.text,
+            "cited_document_ids": list(result.explanation.cited_document_ids),
+            "generated_by": result.explanation.generated_by,
+            "evidence": [e.__dict__ for e in result.evidence],
+        })
 
     state.status = "ended"
     seq.emit(CALL_ENDED, {})

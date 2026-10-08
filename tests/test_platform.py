@@ -77,7 +77,13 @@ class TestRunCall(unittest.TestCase):
         self.assertTrue(all(d.outcome.value == "suppressed" for d in decisions))
         self.assertTrue(all(d.recommendation is None for d in decisions))
         self.assertEqual(agent.model.calls, 0)
-        self.assertNotIn("copilot.suggestion_generated", [e.event_type for e in events])
+        # copilot.suggestion_generated now fires for every outcome (it also
+        # carries the non-commercial "focus on service recovery" guidance an
+        # agent should see on a suppressed call) -- the actual compliance
+        # guarantee is that it never names a product here.
+        suggestions = [e.payload for e in events if e.event_type == "copilot.suggestion_generated"]
+        self.assertTrue(suggestions)
+        self.assertTrue(all(s["product_id"] is None for s in suggestions))
 
 
 # Every scripted call in data/calls/, and the outcome/product it's supposed to

@@ -195,26 +195,44 @@ function updateDecision(payload) {
   const outcome = payload.outcome;
   const card = document.createElement("div");
   card.className = "decision-card";
+  card.dataset.outcome = outcome;
 
-  const banner = document.createElement("div");
+  const head = document.createElement("div");
+  head.className = "decision-head";
+  const banner = document.createElement("span");
   banner.className = `status-banner status-${outcome}`;
   banner.textContent = outcome.replace(/_/g, " ").toUpperCase();
-  card.appendChild(banner);
+  head.appendChild(banner);
+  // Why this turn, specifically, got evaluated at all -- the trigger engine's
+  // own reason (trigger.py), not just what it decided. Easy to lose track of
+  // once a few turns have gone by, and a natural question to get asked.
+  if (payload.trigger_reason) {
+    const why = document.createElement("span");
+    why.className = "decision-trigger";
+    why.textContent = `triggered: ${payload.trigger_reason}`;
+    why.title = "Why the rule engine checked in on this turn (see trigger.py)";
+    head.appendChild(why);
+  }
+  card.appendChild(head);
 
   const decisions = payload.policy_decisions || [];
-  const rules = document.createElement("ul");
-  rules.className = "policy-list";
+  const rules = document.createElement("div");
+  rules.className = "policy-chips";
   if (!decisions.length) {
-    const li = document.createElement("li");
-    li.textContent = "(no policy rule fired)";
-    rules.appendChild(li);
+    const chip = document.createElement("span");
+    chip.className = "policy-chip policy-chip-none";
+    chip.textContent = "no policy rule fired";
+    rules.appendChild(chip);
   }
   for (const d of decisions) {
-    const li = document.createElement("li");
+    const chip = document.createElement("span");
+    chip.className = "policy-chip";
     // d is {subject, rule_id, outcome, reason} now; tolerate the older flat
     // rule_id string shape too, for calls recorded before this changed.
-    li.textContent = typeof d === "string" ? d : `${d.subject} — ${d.reason}`;
-    rules.appendChild(li);
+    const text = typeof d === "string" ? d : `${d.subject} — ${d.reason}`;
+    chip.textContent = text;
+    chip.title = text;
+    rules.appendChild(chip);
   }
   card.appendChild(rules);
 
@@ -232,31 +250,49 @@ function updateDecision(payload) {
 function showSuggestion(payload) {
   const target = currentDecisionCard || statusAreaEl;
   const block = document.createElement("div");
-  block.className = "suggestion-block";
+  // Outcome-colored left border (status-${outcome} on the parent card, read
+  // back here) so the hero block's accent matches the banner above it even
+  // though this event carries no outcome field of its own.
+  const outcome = target.dataset ? target.dataset.outcome : null;
+  block.className = `suggestion-block${outcome ? ` status-${outcome}` : ""}`;
 
+  const head = document.createElement("div");
+  head.className = "suggestion-head";
+  const label = document.createElement("span");
+  label.className = "suggestion-label";
+  // Every outcome now carries guidance text (see processor.py) -- only
+  // "recommended" is naming an actual product, so only that one gets called
+  // a "talking point"; everything else is framed as guidance, not a pitch.
+  label.textContent = payload.product_id ? "Recommended talking point" : "Agent guidance — what to focus on now";
+  head.appendChild(label);
   const badge = document.createElement("span");
   badge.className = `gen-badge gen-${payload.generated_by}`;
   badge.textContent = payload.generated_by === "llm" ? "narrator" : "template fallback";
-  block.appendChild(badge);
-
+  head.appendChild(badge);
   // Slide 21 talking point: which deployment produced this, and its
   // deadline -- only present in cloud mode (see cloud_workbench_server.py).
   if (payload.narrator_profile) {
     const prof = document.createElement("span");
     prof.className = "narrator-profile";
     prof.textContent = payload.narrator_profile;
-    block.appendChild(prof);
+    head.appendChild(prof);
   }
+  block.appendChild(head);
 
   const text = document.createElement("div");
   text.className = "suggestion-text";
   text.textContent = payload.explanation;
   block.appendChild(text);
 
-  const cites = document.createElement("div");
-  cites.className = "citelist";
-  cites.textContent = `cites: ${(payload.cited_document_ids || []).join(", ") || "none"}`;
-  block.appendChild(cites);
+  // Citations only mean something next to an actual recommendation --
+  // showing "cites: none" under plain service-recovery guidance would read
+  // as a defect report, not a neutral fact.
+  if (payload.product_id || (payload.cited_document_ids || []).length) {
+    const cites = document.createElement("div");
+    cites.className = "citelist";
+    cites.textContent = `cites: ${(payload.cited_document_ids || []).join(", ") || "none"}`;
+    block.appendChild(cites);
+  }
 
   const details = document.createElement("details");
   const summary = document.createElement("summary");
@@ -985,8 +1021,9 @@ function renderReplay(events) {
     } else if (evt.event_type === "commercial.decision_made") {
       const rules = (p.policy_decisions || []).map((d) =>
         typeof d === "string" ? esc(d) : `${esc(d.subject)} — ${esc(d.reason)}`).join("; ") || "(none fired)";
+      const why = p.trigger_reason ? `<div class="citelist">triggered: ${esc(p.trigger_reason)}</div>` : "";
       decisionBlocks.push(`<div class="status-banner status-${esc(p.outcome)}" style="margin:10px 0 4px">${esc(p.outcome.replace(/_/g, " ").toUpperCase())}</div>
-        <div class="citelist">policy: ${rules}</div>`);
+        ${why}<div class="citelist">policy: ${rules}</div>`);
     } else if (evt.event_type === "copilot.suggestion_generated") {
       const extra = `<div class="suggestion-text">${esc(p.explanation)}</div><div class="citelist">cites: ${esc((p.cited_document_ids || []).join(", ") || "none")}</div>`;
       if (decisionBlocks.length) decisionBlocks[decisionBlocks.length - 1] += extra;

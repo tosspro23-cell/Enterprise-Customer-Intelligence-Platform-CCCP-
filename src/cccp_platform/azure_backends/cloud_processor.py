@@ -23,7 +23,7 @@ from .sentiment_language import analyse_sentiment, tag_themes
 from .speech import roundtrip as speech_roundtrip
 from ..events import (CALL_ENDED, CALL_STARTED, DECISION_MADE, EventSequencer, SENTIMENT_UPDATED,
                        SUGGESTION_GENERATED, THEME_DETECTED, UTTERANCE_FINAL)
-from ..trigger import TriggerEngine
+from ..trigger import TriggerEngine, describe as describe_trigger
 
 
 def run_call_cloud(
@@ -54,7 +54,8 @@ def run_call_cloud(
             seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active})
 
         sentiment_now, themes_now = state.read_live_signal()
-        if not trigger_engine.evaluate(sentiment_now, themes_now):
+        reason = trigger_engine.evaluate(sentiment_now, themes_now)
+        if not reason:
             continue
         live = LiveCallSignal(call_id, sentiment_now or 0.0, tuple(themes_now))
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
@@ -66,12 +67,15 @@ def run_call_cloud(
             "degraded": list(result.degraded),
             "trace_id": result.trace_id,
             "spans": [{"name": s["name"], "duration_ms": s["duration_ms"]} for s in result.spans],
+            "trigger_reason": describe_trigger(reason),
         })
-        if result.outcome.value == "recommended":
-            seq.emit(SUGGESTION_GENERATED, {
-                "product_id": result.recommendation.product_id,
-                "generated_by": result.explanation.generated_by,
-            })
+        # Always emitted, not just for "recommended" -- see processor.py's
+        # identical change for why (deferred/suppressed/handoff outcomes
+        # still carry agent guidance worth showing).
+        seq.emit(SUGGESTION_GENERATED, {
+            "product_id": result.explanation.product_id,
+            "generated_by": result.explanation.generated_by,
+        })
 
     state.end()
     seq.emit(CALL_ENDED, {})
@@ -131,7 +135,8 @@ def run_call_cloud_voice(
             seq.emit(THEME_DETECTED, {"themes": themes, "active_themes": active})
 
         sentiment_now, themes_now = state.read_live_signal()
-        if not trigger_engine.evaluate(sentiment_now, themes_now):
+        reason = trigger_engine.evaluate(sentiment_now, themes_now)
+        if not reason:
             continue
         live = LiveCallSignal(call_id, sentiment_now or 0.0, tuple(themes_now))
         result = agent.run(DecisionRequest(customer_id, as_of, call_id=call_id, live_signal=live))
@@ -142,12 +147,12 @@ def run_call_cloud_voice(
             "policy_decisions": [d.rule_id for d in result.policy_decisions],
             "degraded": list(result.degraded),
             "trace_id": result.trace_id,
+            "trigger_reason": describe_trigger(reason),
         })
-        if result.outcome.value == "recommended":
-            seq.emit(SUGGESTION_GENERATED, {
-                "product_id": result.recommendation.product_id,
-                "generated_by": result.explanation.generated_by,
-            })
+        seq.emit(SUGGESTION_GENERATED, {
+            "product_id": result.explanation.product_id,
+            "generated_by": result.explanation.generated_by,
+        })
 
     state.end()
     seq.emit(CALL_ENDED, {})
