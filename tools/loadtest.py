@@ -1,16 +1,22 @@
 """Concurrency smoke test: runs the scripted golden call concurrently against
-the real Azure backends (Event Hubs, Azure Managed Redis, Azure AI Search,
-Azure OpenAI) at a few concurrency levels, and reports per-stage latency plus
-the error rate. At the default 6 calls per level this is a smoke test, not a
-load test: it shows the stack works concurrently, not how it scales.
+the real Azure backends (Event Hubs, Azure Managed Redis, Azure OpenAI) at a
+few concurrency levels, and reports per-stage latency plus the error rate.
+At the default 6 calls per level this is a smoke test, not a load test: it
+shows the stack works concurrently, not how it scales.
+
+Guidance retrieval uses the synthetic in-process index (estate.guidance_port()),
+not Azure AI Search -- AI Search was removed from the stack entirely
+(README.md "Cost tracking"), so guidance_search_ms below reflects an
+in-process lookup, not a network call; it's reported for parity with the
+live demo's own trace, not as an infrastructure latency measurement.
 
 Statistics: min/median/max always; p95/p99 only when a stage has at least
 MIN_N_FOR_TAIL samples -- with fewer, a "p95" is just the maximum.
 
 This measures the managed services' real behaviour under concurrent load,
 not the local Workbench server (stdlib http.server was never meant to be
-load-tested; see README.md). Requires AZURE_OPENAI_*, EVENTHUB_*,
-AZURE_SEARCH_*, REDIS_* in the environment (see .env.azure, not committed).
+load-tested; see README.md). Requires AZURE_OPENAI_*, EVENTHUB_*, REDIS_* in
+the environment (see .env.azure, not committed).
 
 Usage:
   python tools/loadtest.py --concurrency 1,3,6 --calls-per-level 6
@@ -34,7 +40,6 @@ from cccp_agent.adapters.azure_openai import AzureOpenAINarrator  # noqa: E402
 from cccp_agent.adapters.synthetic import SyntheticEstate  # noqa: E402
 from cccp_platform.azure_backends.cloud_processor import run_call_cloud  # noqa: E402
 from cccp_platform.azure_backends.event_hub_bus import EventHubSink  # noqa: E402
-from cccp_platform.azure_backends.search_guidance import AzureSearchGuidanceIndex  # noqa: E402
 
 AS_OF = date(2026, 10, 5)
 SCRIPT_PATH = ROOT / "data" / "calls" / "golden_savings.json"
@@ -62,9 +67,15 @@ def _one_call(estate: SyntheticEstate, narrator_timeout_s: float, run_idx: int) 
     script["call_id"] = f"{script['call_id']}_lt{run_idx:04d}_{int(time.time() * 1000) % 100000}"
 
     sink = EventHubSink()
+    # Guidance retrieval uses the same synthetic in-process index the live
+    # demo now uses (cloud_workbench_server.py), not AzureSearchGuidanceIndex
+    # -- AI Search was removed from the stack entirely (README.md "Cost
+    # tracking"), so this would otherwise fail fast against a deleted
+    # service and mask the one thing this script still exists to measure:
+    # real narrator/Redis/Event Hubs latency under concurrency.
     agent = CommercialDecisionAgent(
         estate.customer_port(), estate.interaction_port(), estate.model_port(),
-        AzureSearchGuidanceIndex(), estate.catalog, AzureOpenAINarrator(), narrator_timeout_s=narrator_timeout_s)
+        estate.guidance_port(), estate.catalog, AzureOpenAINarrator(), narrator_timeout_s=narrator_timeout_s)
 
     t0 = time.perf_counter()
     error = None

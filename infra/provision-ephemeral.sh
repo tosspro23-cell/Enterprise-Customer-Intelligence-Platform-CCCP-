@@ -49,6 +49,26 @@ if [[ -z "$EH_CONN" || -z "$REDIS_HOST" || -z "$REDIS_PASSWORD" ]]; then
   exit 1
 fi
 
+# .env.azure (local, gitignored) is read by anyone running tools/loadtest.py
+# or cloud_workbench_server.py from a laptop -- not just the Container Apps
+# below. Recreating Redis/Event Hub rotates both the password and the
+# connection string's shared access key, so a stale .env.azure here fails
+# local runs with an opaque "invalid username-password pair" (seen first-hand
+# running loadtest.py right after a teardown/provision cycle, before this
+# step existed). Skipped quietly if the file isn't there.
+ENV_FILE="../.env.azure"
+if [[ -f "$ENV_FILE" ]]; then
+  echo "==> Syncing .env.azure (local dev/loadtest credentials) to match"
+  python3 - "$REDIS_PASSWORD" "$EH_CONN" "$ENV_FILE" <<'PYEOF'
+import re, sys
+redis_pw, eh_conn, path = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path).read()
+text = re.sub(r'^REDIS_PASSWORD=".*"$', f'REDIS_PASSWORD="{redis_pw}"', text, flags=re.M)
+text = re.sub(r'^EVENTHUB_CONNECTION_STRING=".*"$', f'EVENTHUB_CONNECTION_STRING="{eh_conn}"', text, flags=re.M)
+open(path, "w").write(text)
+PYEOF
+fi
+
 SUFFIX="eph$(date +%H%M%S)"
 for app in "${APPS[@]}"; do
   echo "==> Updating secrets on $app"

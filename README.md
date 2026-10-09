@@ -151,6 +151,54 @@ correctness, or `AZURE_OPENAI_DEPLOYMENT=<deployment> python
 tools/loadtest.py --concurrency 1 --calls-per-level 30 --narrator-timeout
 20` for the latency distribution above.
 
+**Re-measured again at concurrency 1, 3 and 6 (n = 30 each)**, closing the
+"only at concurrency 1" gap the paragraph above used to end on:
+`evals/report/loadtest_realtime_concurrency.json`.
+
+| Concurrency | n | min | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|---|
+| 1 | 30 | 2620ms | 3713ms | 5066ms | 5931ms | 5931ms |
+| 3 | 30 | 2605ms | 3153ms | 4224ms | 4588ms | 4588ms |
+| 6 | 30 | 2655ms | 3285ms | 4142ms | 4601ms | 4601ms |
+
+Concurrency up to 6 simultaneous calls did not blow up narrator latency --
+if anything concurrency 3/6 look slightly *better* than concurrency 1 here,
+which is noise (run-to-run GlobalStandard variance, n = 30 each, not a
+real concurrency benefit) rather than a finding to lean on. The honest
+read: at this concurrency range, the deployment's own latency variance
+dominates over contention effects.
+
+Exact deadline pass rates, computed from the raw per-call samples (the
+report's `narrator_ms_sorted`), not interpolated between percentile points:
+
+| Budget | c=1 | c=3 | c=6 |
+|---|---|---|---|
+| 3.0s (current) | 17% | 40% | 23% |
+| 3.5s | 43% | 73% | 77% |
+| 4.0s | 67% | 83% | 90% |
+| 4.5s | 83% | 97% | 97% |
+| 5.0s | 93% | 100% | 100% |
+
+Raising `NARRATOR_DEADLINE_S` from 3.0s to 4.0s would move most calls from
+template fallback to a real narrator response (roughly two-thirds to 90%,
+depending on concurrency) without reaching 5s, which is already pushing
+what feels "real-time" to someone waiting on a live call.
+
+One genuine concurrency finding, at the other two dependencies, not the
+narrator: at concurrency 6, `event_publish_ms` (Event Hubs Basic tier) hit
+a 156-second max on one call (p95 still a normal ~1s -- a single severe
+outlier, not a trend) and `redis_roundtrip_ms` hit 7.6s max (p95 ~0.9s,
+same shape). Consistent with Basic-tier Event Hubs' throughput-unit ceiling
+under concurrent publish bursts -- a real signal that the production
+concurrency question (tens of simultaneous calls, still open per the "Not
+validated" list below) would need a higher Event Hubs tier, not just a
+higher narrator deadline.
+
+Guidance retrieval (`guidance_search_ms` in the same report) now reads
+~0ms at every percentile -- expected, not a regression: it's measuring the
+in-process synthetic lookup `tools/loadtest.py` was switched to alongside
+the live demo (see "Cost tracking" below), not a network call.
+
 ## Concurrency smoke test against the full real backend stack
 
 Beyond the narrator, the hot-path dependencies the architecture names --
@@ -289,11 +337,13 @@ mode already uses, not `AzureSearchGuidanceIndex` -- marked `local: True`
 on its `pipeline.stage` event so the trace panel says so honestly
 ("Azure AI Search (local stand-in)") rather than silently claiming a cloud
 call that no longer happens; the header's mode badge was edited to match.
-A real Azure AI Search index is unaffected as a validated dependency for
-`tools/loadtest.py` (see above) -- it's provisioned only for that, not left
-running for the interactive demo. (Azure's free-tier AI Search quota is one
-service per subscription and was already spent by an unrelated project on
-the same subscription, so "downgrade to Free" wasn't available here --
+`tools/loadtest.py` was switched the same way (previously the one place
+still depending on a real index, until there turned out to be no cheap way
+to keep one around just for that -- see the concurrency re-measurement
+above, which is what that change was actually for). (Azure's free-tier AI
+Search quota is one service per subscription and was already spent by an
+unrelated project on the same subscription, so "downgrade to Free" wasn't
+available here --
 "don't run it when nothing needs it" was the only lever left.)
 
 Two Container Apps now run in the shared environment: `cccp-workbench-app`
@@ -421,12 +471,15 @@ Not validated: semantic faithfulness of narrator text beyond what a lexical
 validator can see -- it rejects unsupported numbers (digits and spelled-out
 percentages), other products' names, uncited output and listed prohibited
 phrases, but a paraphrased promise ("you will definitely earn more") still
-passes it; latency or cost at production call **concurrency** (tens of
-calls running at once competing for the same GlobalStandard quota, not one
-call at a time back-to-back -- narrator latency has now been re-measured
-at n = 30, see above, but only at concurrency 1; that's the dimension
-docs/architecture.md §9.7's real-time budget is actually about and it is
-still open); a true same-region
+passes it; latency or cost at **production-scale** call concurrency (tens
+of simultaneous calls competing for the same GlobalStandard quota, not six
+-- narrator latency has now been re-measured at concurrency 1/3/6, n = 30
+each, see above, and held up fine at that range, but 6 is still a smoke
+test's worth of concurrency, not production's; the concurrency run did
+surface a real, different concern at that range though -- Event Hubs
+Basic tier's throughput-unit ceiling, see above -- which production
+concurrency would need addressed regardless of the narrator question); a
+true same-region
 deployment (the Container Apps run landed in a different Azure region
 from Redis/AI Search/OpenAI, not the same one -- see the comparison
 section above); Web PubSub; a trained theme classifier (still a keyword
