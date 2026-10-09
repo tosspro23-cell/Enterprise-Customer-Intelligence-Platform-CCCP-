@@ -20,7 +20,10 @@ link that carries `?token=...` (ask the author); without it the page loads
 but runs are refused. Pick a scenario, watch the "LIVE AZURE" badge (it
 names the narrator deployment and its deadline) and the per-stage latency
 panel fill in as the call actually hits Speech, Language, Event Hubs,
-Redis, AI Search and Azure OpenAI. Decision sub-stages are marked
+Redis and Azure OpenAI. Guidance retrieval runs against a local synthetic
+index, not Azure AI Search -- see "Cost tracking" below for why; the trace
+panel marks that step "(local stand-in)" rather than overclaiming it.
+Decision sub-stages are marked
 "replayed from trace": they ran inside one `agent.run()` call and are
 revealed afterwards with their real durations. This is a time-boxed validation deployment (see
 "Cost tracking" below), not a permanent service -- if the link is down,
@@ -247,20 +250,51 @@ Cost note: this is also, deliberately, the one component of this
 exercise still running continuously rather than torn down right after
 use -- see the cost-tracking section below for why and for how long.
 
-## Cost tracking: a multi-day run on free-trial credit
+## Cost tracking: what a multi-day run on free-trial credit actually cost
 
-This subscription is a genuine Azure Free Trial (`quotaId: FreeTrial_2014-09-01`,
-spending limit on -- verified via `az rest`, not assumed) with a few days
-of credit left. Per-request teardown (the pattern used for the first load
-test above) was replaced with a deliberate multi-day run: Event Hubs,
-Redis, AI Search, Speech, Language, Azure OpenAI and the Container App are
-all being left running so real idle-plus-light-use cost over days, not
-minutes, can be read back from Cost Management once it posts (billing
-data lags; it was not yet available at write time). The spending-limit
-protection means the realistic failure mode is the subscription being
-disabled when credit runs out, not a surprise bill -- which is what makes
-leaving this running for a few days a reasonable way to answer "what does
-this actually cost," rather than a risk.
+This started as a genuine Azure Free Trial (`quotaId: FreeTrial_2014-09-01`,
+spending limit on) with a multi-day run deliberately left running instead
+of torn down per-request, specifically to read back real idle-plus-light-use
+cost from Cost Management once it posted. It posted. Two real findings:
+
+**The predicted failure mode happened, exactly as predicted.** The trial's
+~30 days ran out and the subscription was suspended (the Container Apps
+environment, Redis, and everything else on it stopped responding --
+verified directly, not inferred: `az containerapp show` returned
+`provisioningState: "Failed"`, and the activity log's own wording was
+"compute resource ... suspended due to subscription has been disabled").
+No surprise bill -- the first invoice (the trial period, 2026-09-08 to
+2026-09-30) shows `billedAmount: 17.78 EUR`, `creditAmount: -17.78 EUR`,
+`amountDue: 0.00 EUR`, status `Paid`. Confirmed via the Cost Management /
+Billing REST API (`az rest` against `Microsoft.CostManagement/query` and
+`Microsoft.Billing/.../invoices`), not the portal's estimate.
+
+**The spend was dominated by standing infrastructure, not call volume --
+and AI Search was most of it.** A `az rest` cost-by-resource query for the
+period in progress (not yet invoiced) showed `cccp-workbench-search`
+(Azure AI Search, Basic tier) at **5.69 EUR, ~half the subscription's
+month-to-date total** -- for a service that, per its own docstring
+(`search_guidance.py`), was never doing real ranked retrieval, just a
+`search_text="*"` filtered lookup over ~15 synthetic guidance documents. By
+contrast, every real narrator call made across this entire project
+(including the n=30 latency retest above) totalled **0.16 EUR**. The
+lesson: for a service like this, the dominant cost is "a Basic/Standard-tier
+PaaS resource existing 24/7," not usage -- API calls were never the
+expensive part. Redis (Balanced_B0) and Event Hubs (Basic) are the same
+shape of cost (billed by provisioned existence, not traffic) but smaller.
+
+Acted on it: the interactive Workbench (`cloud_workbench_server.py`) now
+runs guidance retrieval against the same in-process synthetic index local
+mode already uses, not `AzureSearchGuidanceIndex` -- marked `local: True`
+on its `pipeline.stage` event so the trace panel says so honestly
+("Azure AI Search (local stand-in)") rather than silently claiming a cloud
+call that no longer happens; the header's mode badge was edited to match.
+A real Azure AI Search index is unaffected as a validated dependency for
+`tools/loadtest.py` (see above) -- it's provisioned only for that, not left
+running for the interactive demo. (Azure's free-tier AI Search quota is one
+service per subscription and was already spent by an unrelated project on
+the same subscription, so "downgrade to Free" wasn't available here --
+"don't run it when nothing needs it" was the only lever left.)
 
 Two Container Apps now run in the shared environment: `cccp-workbench-app`
 (headless, `apps/api/cloud_server.py` -- triggers/reports the load test

@@ -117,6 +117,11 @@ def run_level(concurrency: int, calls: int, estate: SyntheticEstate, narrator_ti
         "event_publish_ms": _percentiles(publish_all),
         "redis_roundtrip_ms": _percentiles(redis_all),
         "narrator_ms": _percentiles(narrator_all),
+        # Raw, sorted -- the summary percentiles above don't let a reader ask
+        # "what fraction would finish inside a 4s budget instead of 3s", which
+        # is exactly the question a deadline tradeoff needs answered exactly,
+        # not interpolated from three fixed percentile points.
+        "narrator_ms_sorted": sorted(round(x * 1000, 1) for x in narrator_all),
         "guidance_search_ms": _percentiles(guidance_all),
     }
 

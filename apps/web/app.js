@@ -63,7 +63,11 @@ const STAGE_CATALOG = {
     technical: "PredictiveModelPort.score_products(); fixed feature schema, no live-call features injected. Synthetic fixture data in this build, not a real model endpoint." },
   search: { code: "SEARCH", label: "Guidance Retrieval", system: "Azure AI Search", source: "cloud",
     business: "Finds the company-approved script for recommending this product.",
-    technical: "Hybrid search filtered by product + situation + active version." },
+    technical: "Runs against the same in-process synthetic index local mode uses, not a live Azure AI Search "
+      + "call -- an always-on Basic-tier index was the single largest line item on the Azure bill for a stage "
+      + "that was never doing real ranked retrieval anyway (search_text=\"*\" plus an exact product/situation "
+      + "filter, no hybrid/semantic ranking -- see search_guidance.py). A real Azure AI Search index still "
+      + "backs tools/loadtest.py's infrastructure validation; it's just not in this interactive path." },
   narrator: { code: "LLM", label: "Narrator", system: "Azure OpenAI", source: "cloud",
     business: "Turns the decision into a sentence the agent can actually say to the customer.",
     technical: "LLM call; output validated against grounded context (citations, numbers, product match) before use; template fallback on any violation." },
@@ -939,7 +943,7 @@ async function loadMode() {
     const data = await resp.json();
     if (data.mode === "azure-live") {
       const narrator = data.narrator_deployment ? ` · narrator ${data.narrator_deployment}, ${data.narrator_deadline_s}s deadline` : "";
-      modeBadgeEl.textContent = `LIVE AZURE -- real Speech/Language/Event Hubs/Redis/AI Search/OpenAI${narrator}`;
+      modeBadgeEl.textContent = `LIVE AZURE -- real Speech/Language/Event Hubs/Redis/OpenAI, local guidance index${narrator}`;
       modeBadgeEl.style.background = "color-mix(in srgb, var(--ok) 20%, transparent)";
       modeBadgeEl.style.color = "var(--ok)";
     } else {

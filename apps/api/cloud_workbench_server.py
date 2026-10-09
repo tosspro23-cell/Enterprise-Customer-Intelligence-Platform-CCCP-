@@ -9,8 +9,9 @@ what each event is sourced from:
   every step              -> a real Redis round trip (hot state) and a real
                               Event Hubs publish (domain event)
   trigger fires            -> the real CommercialDecisionAgent: policy gate,
-                              propensity model (synthetic), Azure AI Search
-                              (guidance), Azure OpenAI (narrator)
+                              propensity model (synthetic), guidance retrieval
+                              (synthetic in-process index, not Azure AI Search
+                              -- see below), Azure OpenAI (narrator)
 
 Every one of those steps is emitted to the browser as a `pipeline.stage`
 event (running, then done with real latency) in addition to the normal
@@ -18,8 +19,19 @@ domain events, so the Workbench can render a full, honest trace of what
 actually ran -- see apps/web/app.js's STAGE_CATALOG for how each stage is
 presented and which ones are real cloud calls vs. local stand-ins.
 
-Run: set AZURE_OPENAI_*, EVENTHUB_*, AZURE_SEARCH_*, REDIS_*,
-AZURE_SPEECH_*, AZURE_LANGUAGE_* (see .env.azure, not committed), then
+Guidance retrieval (`estate.guidance_port()`, not `AzureSearchGuidanceIndex`):
+an always-on Basic-tier Azure AI Search service was the single largest line
+item on the Azure bill for a stage that -- like the propensity model --
+never did real ranked retrieval anyway (`search_text="*"` plus an exact
+filter; see search_guidance.py's own docstring). Swapped to the same
+in-process synthetic index local mode already uses, marked `local: True`
+on its pipeline.stage event so the trace panel still shows it honestly
+(STAGE_CATALOG.search, "(local stand-in)") rather than implying a cloud
+call that no longer happens. AZURE_SEARCH_* / search_guidance.py are kept
+for `tools/loadtest.py` and anyone who wants to re-provision a real index.
+
+Run: set AZURE_OPENAI_*, EVENTHUB_*, REDIS_*, AZURE_SPEECH_*,
+AZURE_LANGUAGE_* (see .env.azure, not committed), then
 `python apps/api/cloud_workbench_server.py`. Deployed to Azure Container
 Apps as a second entry point into the image server.py/cloud_server.py
 already ship in (see Dockerfile) -- selected by overriding the container's
@@ -58,7 +70,6 @@ from cccp_agent.narrative import readable_policy_decisions  # noqa: E402
 from cccp_platform import assistant as assistant_mod  # noqa: E402
 from cccp_platform.azure_backends.event_hub_bus import EventHubSink  # noqa: E402
 from cccp_platform.azure_backends.redis_state import RedisCallState  # noqa: E402
-from cccp_platform.azure_backends.search_guidance import AzureSearchGuidanceIndex  # noqa: E402
 from cccp_platform.azure_backends.sentiment_language import analyse_sentiment, tag_themes  # noqa: E402
 from cccp_platform.azure_backends.speech import synthesize as speech_synthesize  # noqa: E402
 from cccp_platform.azure_backends.speech import transcribe as speech_transcribe  # noqa: E402
@@ -182,7 +193,12 @@ def start_call(script_id: str) -> str:
             seq = EventSequencer(run_id, script["customer_id"], trace_id, "cloud-workbench-voice", dual_sink)
             state = RedisCallState(run_id, script["customer_id"], script["agent_id"])
             agent = CommercialDecisionAgent(estate.customer_port(), estate.interaction_port(), estate.model_port(),
-                                             AzureSearchGuidanceIndex(), estate.catalog,
+                                             # Guidance retrieval runs against the synthetic in-process index, not
+                                             # Azure AI Search -- see the module docstring and STAGE_CATALOG.search
+                                             # in app.js for why (cost: a Basic-tier always-on service was the
+                                             # single largest line item on the Azure bill for a stage that, like
+                                             # the propensity model, was never doing real ranked retrieval anyway).
+                                             estate.guidance_port(), estate.catalog,
                                              AzureOpenAINarrator(deployment=NARRATOR_DEPLOYMENT),
                                              narrator_timeout_s=NARRATOR_DEADLINE_S)
             decisions = []
@@ -310,14 +326,17 @@ def start_call(script_id: str) -> str:
                 for e in result.evidence:
                     evidence_by_kind.setdefault(e.kind, []).append(e)
 
-                def emit_decision_stage(stage: str, ms: float, detail: dict | None = None) -> None:
+                def emit_decision_stage(stage: str, ms: float, detail: dict | None = None, local: bool = False) -> None:
                     # Replayed from the agent's own trace after run() returned -- the
                     # durations are real, the running->done reveal is not live.
                     iid = stage_start(stage)
                     clean = {k: v for k, v in (detail or {}).items() if v} or {}
                     clean["timing_source"] = ["replayed from the agent trace after the decision (real durations)"]
-                    seq.emit("pipeline.stage", {"stage": stage, "status": "done", "instance_id": iid,
-                                                 "ms": round(ms, 1), "replayed": True, "detail": clean})
+                    payload = {"stage": stage, "status": "done", "instance_id": iid,
+                               "ms": round(ms, 1), "replayed": True, "detail": clean}
+                    if local:
+                        payload["local"] = True
+                    seq.emit("pipeline.stage", payload)
 
                 gate_ms = sum(s["duration_ms"] for s in result.spans if s["name"] in _GATE_SPANS)
                 emit_decision_stage("gate", gate_ms, {
@@ -337,6 +356,8 @@ def start_call(script_id: str) -> str:
                         hits = evidence_by_kind.get("guidance_chunk", [])
                         detail = {"matched_guidance": [f"{e.source_id} v{e.source_version} -- {e.detail}" for e in hits]
                                    if hits else ["no approved guidance matched -- no recommendation will cite one"]}
+                        emit_decision_stage(stage_key, s["duration_ms"], detail, local=True)
+                        continue
                     elif stage_key == "narrator":
                         llm_ev = evidence_by_kind.get("llm")
                         exceeded = s.get("deadline_exceeded")
