@@ -19,6 +19,15 @@
 // can force a delete+recreate):
 //   az deployment group what-if -g <resource-group> -f infra/main.bicep
 //   az deployment group create  -g <resource-group> -f infra/main.bicep
+//
+// This file also provisioned AI Search, which is no longer part of the
+// live demo (README.md "Cost tracking": an always-on Basic-tier index was
+// the single largest line item on the Azure bill for a stage doing no real
+// ranked retrieval anyway) -- running this whole file again would recreate
+// it. Event Hubs and Redis specifically are routinely torn down and
+// recreated between demo sessions instead, for the same cost reason --
+// that narrower cycle is infra/ephemeral.bicep +
+// provision-ephemeral.sh/teardown-ephemeral.sh, not this file.
 
 @description('Base name used to derive resource names (kept short: Cognitive Services names must be globally unique).')
 @minLength(6)

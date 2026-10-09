@@ -308,6 +308,38 @@ None of this is covered by the automated test suite -- it requires live
 credentials and real resources, so it's validated by these runs and these
 reports, not by CI.
 
+### Event Hubs + Redis: torn down between demo sessions, not left running
+
+The same "standing infrastructure, not call volume, is the real cost" shape
+applies to Event Hubs (~0.32 EUR/day) and Redis (~0.68 EUR/day) -- together
+~30 EUR/month for Azure's cheapest available tier of each, existing or not.
+Unlike AI Search there's no cheaper SKU to fall back to (Basic is already
+Event Hubs' floor; Balanced_B0 is Azure Managed Redis' floor), so the only
+remaining lever is not running them when nothing needs them.
+
+Both hold only ephemeral per-call hot state (a domain-event bus, a scratch
+KV store) -- nothing in either is worth persisting between sessions, unlike
+AI Search's guidance documents, so there's no re-seeding step after
+recreating them. `infra/ephemeral.bicep` defines just these two (split out
+from `main.bicep`, which stays the complete from-scratch reference, not a
+routine teardown/recreate target):
+
+```bash
+infra/teardown-ephemeral.sh    # after a demo session
+infra/provision-ephemeral.sh   # before the next one -- also updates both
+                                # Container Apps' secrets and restarts them,
+                                # since a secret value change alone doesn't
+                                # make a running container re-read it
+```
+
+Billing is metered continuously (confirmed from Cost Management: Redis cost
+0.052 EUR on a day it only existed for part of it, not the ~0.68 EUR a full
+day costs), not billed in whole-day blocks -- running a session for one
+hour costs roughly 1/24 of the daily figures above, not a full day. Azure
+Managed Redis is not instant to provision like a plain VM, though -- budget
+real minutes for `provision-ephemeral.sh`, not seconds, and run it ahead of
+when the demo is actually needed.
+
 ## Layout
 
 ```
