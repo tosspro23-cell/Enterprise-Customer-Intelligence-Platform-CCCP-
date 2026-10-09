@@ -59,8 +59,8 @@ param containerImage string = 'ghcr.io/tosspro23-cell/cccp-workbench:latest'
 @secure()
 param workbenchDemoToken string = ''
 
-@description('Real-time narrator deadline in seconds for the public Workbench (the agent falls back to the template beyond it).')
-param narratorDeadlineSeconds string = '3.0'
+@description('Real-time narrator deadline in seconds for the public Workbench (the agent falls back to the template beyond it). Raised from 3.0 to 4.0 after the n=30 concurrency re-measurement (README.md): at 3.0s only ~17-40% of real calls beat the deadline depending on concurrency, vs ~67-90% at 4.0s, without pushing into the 5s+ range that starts feeling un-real-time.')
+param narratorDeadlineSeconds string = '4.0'
 
 var names = {
   openai: '${baseName}-openai'

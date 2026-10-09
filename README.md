@@ -173,15 +173,16 @@ report's `narrator_ms_sorted`), not interpolated between percentile points:
 
 | Budget | c=1 | c=3 | c=6 |
 |---|---|---|---|
-| 3.0s (current) | 17% | 40% | 23% |
+| 3.0s (previous) | 17% | 40% | 23% |
 | 3.5s | 43% | 73% | 77% |
-| 4.0s | 67% | 83% | 90% |
+| 4.0s (current) | 67% | 83% | 90% |
 | 4.5s | 83% | 97% | 97% |
 | 5.0s | 93% | 100% | 100% |
 
-Raising `NARRATOR_DEADLINE_S` from 3.0s to 4.0s would move most calls from
-template fallback to a real narrator response (roughly two-thirds to 90%,
-depending on concurrency) without reaching 5s, which is already pushing
+Acted on it: `NARRATOR_DEADLINE_S` is now 4.0 on the live Workbench (was
+3.0), moving most calls from template fallback to a real narrator response
+(roughly two-thirds to 90%, depending on concurrency) without reaching 5s,
+which is already pushing
 what feels "real-time" to someone waiting on a live call.
 
 One genuine concurrency finding, at the other two dependencies, not the
