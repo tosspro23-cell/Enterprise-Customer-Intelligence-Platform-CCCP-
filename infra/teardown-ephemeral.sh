@@ -13,6 +13,7 @@
 #
 # Usage: infra/teardown-ephemeral.sh
 # Override the resource group with CCCP_RESOURCE_GROUP=... if needed.
+# Timed end to end on a real run (2026-10-09): ~4-5 minutes.
 set -euo pipefail
 
 RG="${CCCP_RESOURCE_GROUP:-rg-cccp-workbench}"

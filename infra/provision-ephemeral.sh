@@ -6,10 +6,12 @@
 # Container App secret alone does not do that; only a new revision does.
 #
 # Run this before a demo session, after running teardown-ephemeral.sh to
-# tear the previous session's instances down. Takes real minutes, not
-# seconds -- Azure Managed Redis is not instant to provision like a plain
-# VM -- so start it ahead of when you actually need the demo, not as
-# someone is about to watch.
+# tear the previous session's instances down. Timed end to end on a real
+# run (2026-10-09): ~7m20s for the bicep deployment itself (almost all of
+# it Redis), another ~2-3 min for the secret update + restart + health
+# check below -- call it ~10 minutes total, so start it ahead of when you
+# actually need the demo, not as someone is about to watch. Teardown is
+# faster, ~4-5 min.
 #
 # Usage: infra/provision-ephemeral.sh
 # Override the resource group with CCCP_RESOURCE_GROUP=... if needed.
@@ -38,7 +40,7 @@ EH_CONN=$(az eventhubs eventhub authorization-rule keys list \
 REDIS_HOST=$(az resource show --resource-group "$RG" --name "$REDIS_NAME" \
   --resource-type "Microsoft.Cache/redisEnterprise" --query properties.hostName -o tsv)
 REDIS_PASSWORD=$(az redisenterprise database list-keys \
-  --resource-group "$RG" --cluster-name "$REDIS_NAME" --database-name default \
+  --resource-group "$RG" --cluster-name "$REDIS_NAME" \
   --query primaryKey -o tsv)
 
 if [[ -z "$EH_CONN" || -z "$REDIS_HOST" || -z "$REDIS_PASSWORD" ]]; then
